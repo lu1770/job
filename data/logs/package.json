@@ -1,0 +1,15 @@
+{
+  "name": "job-apply-automation",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "BOSS直聘 / 猎聘 / 智联 / 前程无忧 批量搜索与投递自动化（原生 CDP，无第三方依赖）",
+  "bin": { "jobapply": "src/cli.mjs" },
+  "scripts": {
+    "login": "node src/cli.mjs login",
+    "daily": "node src/cli.mjs daily --platform liepin,boss",
+    "platforms": "node src/cli.mjs platforms",
+    "history": "node src/cli.mjs history --platform boss --from-legacy && node src/cli.mjs history --platform liepin --from-legacy"
+  },
+  "engines": { "node": ">=20" }
+}

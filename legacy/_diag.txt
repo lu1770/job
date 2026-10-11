@@ -1,0 +1,242 @@
+--- 点击前 ---
+[
+ {
+  "t": "简历优化",
+  "cls": "header-nav-menu-resume-opt-default",
+  "tag": "DIV",
+  "x": 760,
+  "y": 0,
+  "w": 64,
+  "h": 64
+ },
+ {
+  "t": "简历优化",
+  "cls": "",
+  "tag": "A",
+  "x": 760,
+  "y": 0,
+  "w": 64,
+  "h": 64
+ },
+ {
+  "t": "简历优化",
+  "cls": "",
+  "tag": "SPAN",
+  "x": 760,
+  "y": 21,
+  "w": 64,
+  "h": 21
+ },
+ {
+  "t": "我的投递",
+  "cls": "",
+  "tag": "DIV",
+  "x": 1803,
+  "y": 210,
+  "w": 46,
+  "h": 55
+ },
+ {
+  "t": "聊一聊",
+  "cls": "apply-box",
+  "tag": "DIV",
+  "x": 1133,
+  "y": 97,
+  "w": 384,
+  "h": 44
+ },
+ {
+  "t": "聊一聊",
+  "cls": "btn-main",
+  "tag": "A",
+  "x": 1357,
+  "y": 97,
+  "w": 160,
+  "h": 44
+ },
+ {
+  "t": "聊一聊",
+  "cls": "btn-chat",
+  "tag": "A",
+  "x": 1005,
+  "y": 289,
+  "w": 80,
+  "h": 40
+ },
+ {
+  "t": "聊一聊",
+  "cls": "chat-btn-box",
+  "tag": "DIV",
+  "x": 0,
+  "y": 0,
+  "w": 0,
+  "h": 0
+ },
+ {
+  "t": "聊一聊",
+  "cls": "ant-btn ant-btn-primary ant-btn-round",
+  "tag": "BUTTON",
+  "x": 0,
+  "y": 0,
+  "w": 0,
+  "h": 0
+ },
+ {
+  "t": "聊一聊",
+  "cls": "",
+  "tag": "SPAN",
+  "x": 0,
+  "y": 0,
+  "w": 0,
+  "h": 0
+ }
+]
+JS click: clicked
+--- 点击后 ---
+[
+ {
+  "t": "简历优化",
+  "cls": "header-nav-menu-resume-opt-default",
+  "tag": "DIV",
+  "x": 760,
+  "y": 0,
+  "w": 64,
+  "h": 64
+ },
+ {
+  "t": "简历优化",
+  "cls": "",
+  "tag": "A",
+  "x": 760,
+  "y": 0,
+  "w": 64,
+  "h": 64
+ },
+ {
+  "t": "简历优化",
+  "cls": "",
+  "tag": "SPAN",
+  "x": 760,
+  "y": 21,
+  "w": 64,
+  "h": 21
+ },
+ {
+  "t": "我的投递",
+  "cls": "",
+  "tag": "DIV",
+  "x": 1803,
+  "y": 210,
+  "w": 46,
+  "h": 55
+ },
+ {
+  "t": "发简历\n交换手机号\n交换微信号",
+  "cls": "chatwin-action",
+  "tag": "DIV",
+  "x": 1119,
+  "y": 607,
+  "w": 434,
+  "h": 28
+ },
+ {
+  "t": "发简历",
+  "cls": "ant-im-space-item",
+  "tag": "DIV",
+  "x": 1119,
+  "y": 607,
+  "w": 62,
+  "h": 27
+ },
+ {
+  "t": "发简历",
+  "cls": "im-ui-action-button-title",
+  "tag": "SPAN",
+  "x": 1141,
+  "y": 611,
+  "w": 36,
+  "h": 19
+ },
+ {
+  "t": "继续聊",
+  "cls": "apply-box",
+  "tag": "DIV",
+  "x": 1133,
+  "y": 97,
+  "w": 384,
+  "h": 44
+ },
+ {
+  "t": "继续聊",
+  "cls": "btn-main",
+  "tag": "A",
+  "x": 1357,
+  "y": 97,
+  "w": 160,
+  "h": 44
+ },
+ {
+  "t": "继续聊",
+  "cls": "btn-chat",
+  "tag": "A",
+  "x": 1005,
+  "y": 289,
+  "w": 80,
+  "h": 40
+ },
+ {
+  "t": "聊一聊",
+  "cls": "chat-btn-box",
+  "tag": "DIV",
+  "x": 0,
+  "y": 0,
+  "w": 0,
+  "h": 0
+ },
+ {
+  "t": "聊一聊",
+  "cls": "ant-btn ant-btn-primary ant-btn-round",
+  "tag": "BUTTON",
+  "x": 0,
+  "y": 0,
+  "w": 0,
+  "h": 0
+ },
+ {
+  "t": "聊一聊",
+  "cls": "",
+  "tag": "SPAN",
+  "x": 0,
+  "y": 0,
+  "w": 0,
+  "h": 0
+ },
+ {
+  "t": "我的沟通",
+  "cls": "ant-im-drawer-header",
+  "tag": "DIV",
+  "x": 1849,
+  "y": 0,
+  "w": 280,
+  "h": 57
+ },
+ {
+  "t": "我的沟通",
+  "cls": "ant-im-drawer-title",
+  "tag": "DIV",
+  "x": 1865,
+  "y": 17,
+  "w": 224,
+  "h": 22
+ },
+ {
+  "t": "[简历]",
+  "cls": "",
+  "tag": "SPAN",
+  "x": 1917,
+  "y": 887,
+  "w": 31,
+  "h": 16
+ }
+]
+URL: https://www.liepin.com/job/1973932129.shtml?pgRef=c_pc_search_page%3Ac_pc_search_job_listcard%402_73932129%3A1%3Acd9640ca-2702-4b80-a98c-f8e4e879ebce&d_sfrom=search_prime&d_ckId=null&d_curPage=0&d_pageSize=40&d_headId=null&d_posi=41&skId=xgk1rejiux22or44hucntof8eml82c5a&fkId=xgk1rejiux22or44hucntof8eml82c5a&ckId=xgk1rejiux22or44hucntof8eml82c5a&sfrom=search_job_pc&curPage=0&pageSize=40&index=41

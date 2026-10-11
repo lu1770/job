@@ -1,0 +1,12 @@
+﻿
+ProcessId CommandLine                                                                                                                                                                                                                                                                    
+--------- -----------                                                                                                                                                                                                                                                                    
+    36860 C:\Users\rainb\.workbuddy\binaries\node\versions\22.22.2-6\node.exe C:\Users\rainb\Downloads\WorkBuddy\resources\app.asar.unpacked\main\preload\fork-preload.cjs C:\Users\rainb\Downloads\WorkBuddy\resources\app.asar.unpacked\resources\extensions\edge-sync\server\index.cjs
+    28660 node C:\Users\rainb\.workbuddy\plugins\cache\workbuddy-builtin\sheetagent\5.7.7-wb.40774747.g2e8619da.had9031c93ded/mcp/start.mjs                                                                                                                                              
+    14256 "C:\Users\rainb\.workbuddy\binaries\node\versions\22.22.2-6\node.exe"  "C:\Users\rainb\.workbuddy\plugins\cache\workbuddy-builtin\weixinpay\1.6.110/dist/mcp-server.mjs"                                                                                                       
+    39888 node C:\Users\rainb\.workbuddy\plugins\cache\workbuddy-builtin\sheetagent\5.7.7-wb.40774747.g2e8619da.had9031c93ded/mcp/start.mjs                                                                                                                                              
+     1900 "C:\Users\rainb\.workbuddy\binaries\node\versions\22.22.2-6\node.exe"  "C:\Users\rainb\.workbuddy\plugins\cache\workbuddy-builtin\weixinpay\1.6.110/dist/mcp-server.mjs"                                                                                                       
+    27744 C:\Users\rainb\.workbuddy\binaries\node\versions\22.22.2-6\node.exe boss_chat.mjs BDD580B38F48764F6263C39173659D90 boss_chat_today.json 60                                                                                                                                     
+
+
+
