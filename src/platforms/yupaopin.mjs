@@ -71,27 +71,37 @@ export const homeUrl = `${SITE}/${CITY_CODE}/`;
  * 登录态核验。
  *
  * 判据用右上角的 **「登录丨注册」→ 登录后变成「消息 / 简历 / <用户名>」**。
- * ⚠️ 不要用「点击登录，立即与老板沟通」当搜索页判据 —— 那是详情页的文案，
- *    搜索页未登录时也未必出现（实测游客态与登录态的搜索页头部差异才是可靠的）。
  * 已实测本机 Profile 1 为登录态，页面显示 `路正遥`。
+ *
+ * ⚠️ 必须轮询重试，不能只探一次：
+ *    浏览器刚启动（或新开标签页）时鱼泡 Cookie 还没注入，页面会短暂呈现游客态 ——
+ *    实测 `login` 在 Chrome 冷启动后第一次报「未登录」，紧接着第二次就正常。
+ *    单次探测产生**假阴性**，而 `daily` 会因 `ok=false` 直接跳过整个平台（白跑一轮）。
+ *    故这里重试到判据成立为止；确实被风控拦（waf）则立即返回，不空转。
  */
-export async function loginProbe(cdp) {
+export async function loginProbe(cdp, { tries = 3, gap = 2500 } = {}) {
   await navigate(cdp, searchUrl('.NET'), { settle: 5000 });
-  return evalJson(cdp, `(function(){
-    const t=(document.body?document.body.innerText:'');
-    const head=t.slice(0,1200);
-    // 未登录：右上角为「登录丨注册」；登录后：出现「消息」「简历」与用户名
-    const guest=/登录\\s*[丨|]\\s*注册/.test(head.replace(/\\s+/g,' '));
-    const name=(head.match(/(路正遥)/)||[])[1] || '';
-    const hasNav=/消息/.test(head) && /简历/.test(head);
-    const waf=/acw_sc__v2|aliyunwaf|滑动验证|拖动滑块|请完成安全验证/.test(t);
-    return JSON.stringify({
-      ok: !guest && hasNav && !waf,
-      name, guest, hasNav, waf,
-      cards: document.querySelectorAll('a[href*="/qiye/"]').length,
-      head: t.replace(/\\s+/g,' ').slice(0,80)
-    });
-  })()`, 20000);
+  let last = null;
+  for (let i = 0; i < tries; i++) {
+    last = await evalJson(cdp, `(function(){
+      const t=(document.body?document.body.innerText:'');
+      const head=t.replace(/\\s+/g,' ').slice(0,1500);
+      // 未登录：右上角为「登录丨注册」；登录后：出现「消息」「简历」与用户名
+      const guest=/登录\\s*[丨|]\\s*注册/.test(head);
+      const name=(head.match(/(路正遥)/)||[])[1] || '';
+      const hasNav=/消息/.test(head) && /简历/.test(head);
+      // 本函数只判登录态，风控交给 guard()（判据要保持一致，不要各写一套）
+      return JSON.stringify({
+        ok: !guest && hasNav,
+        name, guest, hasNav, waf:false,
+        cards: document.querySelectorAll('a[href*="/qiye/"]').length,
+        head: head.slice(0,80)
+      });
+    })()`, 20000);
+    if (last && last.ok) return last;
+    if (i < tries - 1) await sleep(gap);
+  }
+  return last;
 }
 
 /**
