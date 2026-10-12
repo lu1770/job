@@ -63,8 +63,8 @@ export async function daily(opts = {}) {
         scan: { file: s.file, total: s.total, hit: s.hit },
         jd: { file: j.file, count: j.count, stopped: j.stopped },
         targets: { file: t.file, count: t.keep.length },
-        apply: { ok: a.ok, already: a.already, unknown: a.unknown, fail: a.fail, stopped: a.stopped, quota: a.quota, log: a.log },
-        verify: { ok: v.ok, already: v.already, unknown: v.unknown, fail: v.fail },
+        apply: { ok: a.ok, already: a.already, skipped: a.skipped, unknown: a.unknown, fail: a.fail, stopped: a.stopped, quota: a.quota, log: a.log },
+        verify: { ok: v.ok, already: v.already, skipped: v.skipped, unknown: v.unknown, fail: v.fail },
         chat: chat ? { needReply: (chat.needReply || []).length } : null,
       };
     } catch (e) {

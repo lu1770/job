@@ -13,14 +13,21 @@
  *    从它向上找到「含 1 个 /qiye/ 链接 + 1 个 /zhaogong/ 链接 + 高度 90~420 + 文本含『元/』」
  *    的容器即为整卡 —— 这是唯一稳定的定位方式（试过详情链接向上找，会切到半张卡）。
  *  - 卡片文本行序固定：行0=标题，行1=薪资，其后=标签/公司/区域。
- *  - 详情页 URL：`/zhaogong/{数字ID}/{token}.html`。**token 每次都变，数字ID 才是稳定岗位ID**。
+ *  - 详情页 URL：`/zhaogong/{数字ID}/{token}.html`。**token 每次都变且有时效**（隔天再访会 404，
+ *    标题「哎呀,页面找不到啦」），数字ID 才是稳定岗位ID；`recoverUrl()` 负责用 ID 换新 token。
  *  - 列表是**纯滚动懒加载**，实测无翻页按钮：16 → 31 → 46 → 61 → 76 → 90 → 105（6 次滚动）。
- *  - 详情页投递按钮：`发送简历`（本体是 SPAN，靠 React root 事件委托，JS click 有效）；
- *    **页面上有两个「发送简历」**，第二个在「相同职位推荐」区且位于视口外 → 必须加视口内+未遮挡过滤；
+ *  - **投递区是两套文案成对出现**（这是本适配器最容易写错的地方）：
+ *      未投递 = `发送简历` + `免费聊`      已投递 = `继续聊` + `拨打电话`
+ *    漏掉「继续聊」会把「早已投递」误报成 `no_btn`（实战 46 条里错判 3 条）。
+ *  - 投递按钮本体是 SPAN（无 onClick），靠 React root 事件委托 → **JS click 有效**（已实测 `via: js`）。
+ *    页面还有第二个「发送简历」在「相同职位推荐」区、位于视口外 y=-1382 → 必须加视口内+未遮挡过滤。
+ *  - 投递后按钮变「继续聊」要 3~8s，固定等 2.2s 回读会误判 unknown（实战 5 条 unknown 里 2 条其实已成功）。
  *  - 详情页薪资写作 `8千-1.2万/月`，core/salary.mjs 解析为 0 → 必须由 normalize() 归一化。
  *  - 登录态：右上角「登录丨注册」= 游客；「消息 / 简历 / 路正遥」= 已登录（实测本机已登录）。
- *  - 岗位招满后标题区显示「**已招满**」并**撤掉投递按钮** → 必须与「按钮没渲染」区分，
- *    否则会当 no_btn 无限重投。token 失效时 URL 跳「页面找不到」，也别当投递失败。
+ *  - 岗位招满后标题区显示「**已招满**」并**撤掉投递按钮** → `closed`（业务终态，不重投）。
+ *  - 详情页连访约 5 次触发阿里云滑块 → `slider_blocked`（约几分钟自行过期）。
+ *
+ * 判据链有纯逻辑单测覆盖：`node scripts/test_yupaopin_btns.mjs`（13 例，不依赖浏览器）。
  */
 import { evalJson, evalJs, sleep, clickAt, navigate, rand } from '../core/cdp.mjs';
 import { withFlags } from '../core/readjd.mjs';
@@ -230,6 +237,41 @@ export function resolveUrl(item) {
   return u.startsWith('/') ? SITE + u : u;
 }
 
+/** 搜索/热门职位页：用于按岗位 ID 反查最新 token（见 recoverUrl） */
+const LIST_URLS = [
+  `${SITE}/topic/${CITY_CODE}${CAT_ALL}/?keywords=C%23`,
+  `${SITE}/zhaogong/${CITY_CODE}_rmgz/`,
+  `${SITE}/${CITY_CODE}/`,
+];
+
+/**
+ * token 失效兜底：鱼泡详情页 URL 里的 token **有时效**（实测隔天再访同一条 url 会跳
+ * 「哎呀,页面找不到啦」）。清单是几天前采的，直接拿去 apply 会整批 404 → not_found。
+ *
+ * 用岗位数字 ID 回到列表页重新捞一条带最新 token 的链接。
+ * 只在详情页返回 not_found 时调用，正常路径不花这个开销。
+ *
+ * @returns {Promise<string|null>} 新 URL；捞不到返回 null
+ */
+export async function recoverUrl(cdp, item, { tries = 3 } = {}) {
+  const id = String(item.id || jobIdOf(item.url || item.href) || '');
+  if (!id) return null;
+  for (let k = 0; k < Math.min(tries, LIST_URLS.length); k++) {
+    await navigate(cdp, LIST_URLS[k], { settle: 3500 });
+    for (let s = 0; s < 3; s++) {   // 列表懒加载，滚一轮再找
+      const href = await evalJson(cdp, `(function(){
+        const a=[...document.querySelectorAll('a')].map(x=>x.getAttribute('href')||'');
+        const m=a.find(h=>h.indexOf('/zhaogong/${id}/')>=0);
+        return m? JSON.stringify(m) : null;
+      })()`, 20000);
+      if (href) return href.startsWith('/') ? SITE + href : href;
+      await evalJs(cdp, 'window.scrollTo(0, document.body.scrollHeight); "ok"', 12000);
+      await sleep(2200);
+    }
+  }
+  return null;
+}
+
 /**
  * 岗位 ID：取 URL 里的**数字ID**（`/zhaogong/486969794/<token>.html`）。
  * token 是每次请求都会变的随机串，绝不能进去重键 —— 与导出的 ID_RE 保持同一口径。
@@ -326,29 +368,46 @@ export async function readJd(cdp) {
  *
  * 未登录时三者（发送简历 / 聊一聊 / 查看详情）都会退化为
  * `点击登录，立即与老板沟通` —— 这是最可靠的登录态判据。
+ *
+ * ⚠️ 实测坑（2026-10-13，投送时批量踩中）：投递区是**两个按钮成对出现**，
+ *    且已投递 / 未投递是两套不同文案，漏掉任一套都会把「已投过」误报成 `no_btn`：
+ *
+ *      未投递：`发送简历` + `免费聊`
+ *      已投递：`继续聊`   + `拨打电话`   ← 早期版本漏了「继续聊」，46 条里 3 条误判
+ *
+ *    判据必须是「**已投递文案优先**」：先找 `继续聊/已投递/…` 再找 `发送简历`，
+ *    否则同一个岗位里两种文案并存时会被当成可投递。
  */
 const APPLY_BTN = `(function(){
-  const kw=/^(发送简历|立即投递|投递简历|聊一聊|立即沟通|继续沟通|已投递|已沟通|申请职位)$/;
+  const READY=/^(发送简历|立即投递|投递简历|申请职位)$/;
+  const DONE=/^(继续聊|已投递|已沟通|已沟通过|继续沟通)$/;
+  const CHAT=/^(免费聊|拨打电话)$/;
   const els=[...document.querySelectorAll('button,a,div,span')].filter(e=>{
     const t=(e.textContent||'').trim(); const r=e.getBoundingClientRect();
-    if(!kw.test(t) || r.width<=50 || r.height<22 || r.width>=340) return false;
+    if(!(READY.test(t)||DONE.test(t)||CHAT.test(t))) return false;
+    if(r.width<=50 || r.height<22 || r.width>=340) return false;
     if(r.top<0 || r.bottom>document.documentElement.clientHeight) return false;   // 视口外（推荐位）
     const cx=Math.round(r.x+r.width/2), cy=Math.round(r.y+r.height/2);
     const hit=document.elementFromPoint(cx,cy);
     return !!hit && (hit===e || e.contains(hit) || hit.contains(e));           // 未被遮挡
   });
-  const done=els.find(e=>/已投递|已沟通|继续沟通/.test(e.textContent||''));
-  if(done) return JSON.stringify({state:'done', text:done.textContent.trim()});
-  const ready=els.find(e=>/发送简历|立即投递|投递简历|申请职位/.test(e.textContent||''));
+  const txt=e=>(e.textContent||'').trim();
+  // 已投递文案优先（必须是第一判据 —— 见文件头「两套文案」说明）
+  const done=els.find(e=>DONE.test(txt(e)));
+  if(done) return JSON.stringify({state:'done', text:txt(done)});
+  // 「发送简历」才是真正的投递动作
+  const ready=els.find(e=>READY.test(txt(e)));
   if(ready){ const r=ready.getBoundingClientRect();
-    return JSON.stringify({state:'ready', text:ready.textContent.trim(), tag:ready.tagName,
+    return JSON.stringify({state:'ready', text:txt(ready), tag:ready.tagName,
       x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2)}); }
+  // 只有沟通类按钮、没有投递按钮：能聊但该岗不收简历投递（别拿去点「免费聊」当投递）
+  const chat=els.find(e=>CHAT.test(txt(e)));
+  if(chat) return JSON.stringify({state:'chat_only', text:txt(chat)});
   // 无按钮但标题区写「已招满」→ 岗位已关闭投递，必须与「按钮没渲染出来」区分开，
   // 否则 applyOne 会把这种岗一直当 no_btn 重投（实测鱼泡招满后会撤掉按钮只留标题提示）。
-  const head=(document.body?document.body.innerText:'').slice(0,400);
-  if(/已招满/.test(head)) return JSON.stringify({state:'closed', text:'已招满'});
-  const t=document.body?document.body.innerText:'';
-  if(/点击登录[，,]?\\s*立即与老板沟通/.test(t)) return JSON.stringify({state:'login'});
+  const body=document.body?document.body.innerText:'';
+  if(/已招满/.test(body.slice(0,400))) return JSON.stringify({state:'closed', text:'已招满'});
+  if(/点击登录[，,]?\\s*立即与老板沟通/.test(body)) return JSON.stringify({state:'login'});
   return null;
 })()`;
 
@@ -391,51 +450,110 @@ export async function applyOne(cdp, item) {
   const g0 = await guard(cdp);
   if (g0 && g0.slider) return { result: 'slider_blocked', guard: g0 };
   if (g0 && g0.waf) return { result: 'waf_blocked' };
-  if (g0 && g0.notFound) return { result: 'not_found' };
+  if (g0 && g0.notFound) {
+    // token 过期 → 回列表页用岗位 ID 换一条新链接再试（见 recoverUrl）
+    const fresh = await recoverUrl(cdp, item);
+    if (!fresh) return { result: 'not_found' };
+    await navigate(cdp, fresh, { settle: 3500 });
+    const g1 = await guard(cdp);
+    if (g1 && g1.slider) return { result: 'slider_blocked', guard: g1 };
+    if (g1 && g1.notFound) return { result: 'not_found' };
+    if (g1 && (g1.loginWall || g1.loginPage)) return { result: 'login_wall', guard: g1 };
+    return applyOnLoaded(cdp, fresh);
+  }
+  if (g0 && (g0.loginWall || g0.loginPage)) return { result: 'login_wall', guard: g0 };
+
+  return applyOnLoaded(cdp, null);
+}
+
+/**
+ * 详情页已就绪后的投递流程（applyOne 的后半段，抽出来供 token 恢复后复用）。
+ * @param {string} [freshUrl] token 恢复后拿到的新 URL —— 会回填到结果里，
+ *        让调用方（apply.mjs 落盘）更新清单，避免下次又拿旧 token。
+ */
+async function applyOnLoaded(cdp, freshUrl) {
+  // 新 URL 贯穿所有返回分支
+  const withUrl = (r) => (freshUrl ? { ...r, freshUrl } : r);
 
   const before = await evalJson(cdp, APPLY_BTN, 15000);
-  if (!before) return { result: 'no_btn' };
-  if (before.state === 'done') return { result: 'already' };
-  if (before.state === 'closed') return { result: 'closed' };   // 已招满，投递入口已被撤掉
-  if (before.state === 'login') return { result: 'login_wall' };
-  if (before.state !== 'ready') return { result: 'unexpected_state', btn: before.text };
+  if (!before) return withUrl({ result: 'no_btn' });
+  if (before.state === 'done') return withUrl({ result: 'already', btn: before.text });
+  if (before.state === 'closed') return withUrl({ result: 'closed', btn: before.text });   // 已招满
+  // 只有沟通类按钮、没有投递按钮：能聊但该岗不收简历投递
+  if (before.state === 'chat_only') return withUrl({ result: 'chat_only', btn: before.text });
+  if (before.state === 'login') return withUrl({ result: 'login_wall' });
+  if (before.state !== 'ready') return withUrl({ result: 'unexpected_state', btn: before.text });
 
   // 路径 1：JS click
   const r = await evalJs(cdp, CLICK_SEND, 15000);
-  if (r !== 'clicked') return { result: 'js_fail' };
-  await sleep(rand(2200, 3200));
+  if (r !== 'clicked') return withUrl({ result: 'js_fail' });
 
-  let after = await evalJson(cdp, APPLY_BTN, 15000);
-  if (after && after.state === 'done') return { result: 'ok', via: 'js' };
+  // 轮询复核，而不是「等 2.2s 读一次」。
+  // 实测：投递后按钮变「继续聊」要 3~8s（要走接口 + 重渲染），固定 2.2s 回读会大量误判 unknown ——
+  // 实测一轮 5 条 unknown，复检发现其中 2 条其实早已投递成功，只是当时没等到。
+  const js = await waitBtnSettled(cdp, 'done');
+  if (js && js.state === 'done') return withUrl({ result: 'ok', via: 'js' });
+  if (js && js.state === 'login') return withUrl({ result: 'login_wall' });
+  if (js && js.state === 'closed') return withUrl({ result: 'closed' });
 
-  // 路径 2：真实鼠标（51job 已证明存在平台只认真实点击）
-  if (after && after.state === 'ready') {
-    await clickAt(cdp, after.x, after.y);
-    await sleep(rand(2200, 3200));
-    after = await evalJson(cdp, APPLY_BTN, 15000);
-    if (after && after.state === 'done') return { result: 'ok', via: 'mouse' };
-    if (after && after.state === 'login') return { result: 'login_wall' };
+  // 路径 2：真实鼠标兜底（51job 已证明存在平台只认真实点击）
+  const cur = js || (await evalJson(cdp, APPLY_BTN, 15000));
+  if (cur && cur.state === 'ready') {
+    await clickAt(cdp, cur.x, cur.y);
+    const ms = await waitBtnSettled(cdp, 'done');
+    if (ms && ms.state === 'done') return withUrl({ result: 'ok', via: 'mouse' });
+    if (ms && ms.state === 'login') return withUrl({ result: 'login_wall' });
+    if (ms && ms.state === 'closed') return withUrl({ result: 'closed' });
   }
 
   const g = await guard(cdp);
-  if (g && g.slider) return { result: 'slider_blocked' };
-  if (g && g.waf) return { result: 'waf_blocked' };
-  if (g && g.loginWall) return { result: 'login_wall' };
-  return { result: 'unknown', btn: after ? `${after.state}:${after.text || ''}` : null };
+  if (g && g.slider) return withUrl({ result: 'slider_blocked' });
+  if (g && g.waf) return withUrl({ result: 'waf_blocked' });
+  if (g && g.notFound) return withUrl({ result: 'not_found' });
+  if (g && g.loginWall) return withUrl({ result: 'login_wall' });
+  // 两路点击都试过仍非 done —— 明确报 unknown（未知），不猜成功也不猜失败
+  return withUrl({ result: 'unknown', btn: cur ? `${cur.state}:${cur.text || ''}` : null, guard: g });
+}
+
+/**
+ * 轮询等待按钮进入目标状态。
+ *
+ * 返回**最后一次读数**（可能为目标态，也可能是超时时的当前态），由调用方判别 ——
+ * 不要用「返回值非空」当「命中」，那会把超时误当成功。
+ *
+ * @param {string} want 目标 state
+ * @param {object} o    tries 轮数；gap 间隔 ms；first 首次等待 ms
+ */
+async function waitBtnSettled(cdp, want = 'done', { tries = 7, gap = 1600, first = 1300 } = {}) {
+  let last = null;
+  for (let i = 0; i < tries; i++) {
+    await sleep(i === 0 ? first : gap);
+    last = await evalJson(cdp, APPLY_BTN, 15000);
+    if (last && last.state === want) return last;
+    // 中途被登录墙/招满拦下：立即返回让上层判，不要空转到超时
+    if (last && (last.state === 'login' || last.state === 'closed')) return last;
+    // 按钮整体消失且已不在详情页（如跳到聊天页）→ 投进去了，别再空转
+    if (last === null) {
+      const href = await evalJs(cdp, 'location.href', 8000);
+      if (typeof href === 'string' && !/\/zhaogong\//.test(href)) {
+        return { state: 'done', text: 'navigated', url: href };
+      }
+    }
+  }
+  return last;
 }
 
 /** 只读巡检：读按钮状态，不点击 */
 export async function probeItem(cdp, item) {
   await navigate(cdp, resolveUrl(item), { settle: 3000 });
   const g = await guard(cdp);
-  // 风控时直接把状态带出去，不要让调用方把 slider 误读成「按钮 null = 没投」
-  if (g && (g.slider || g.waf || g.notFound)) {
-    return {
-      title: item.title,
-      company: item.company,
-      btn: g.notFound ? 'not_found' : (g.waf ? 'waf' : 'slider_blocked'),
-      waf: !!g.waf,
-    };
+  // 风控/未登录/token 失效时直接把状态带出去 —— 不要让调用方把 slider 误读成「按钮 null = 没投」
+  if (g && (g.slider || g.waf || g.notFound || g.loginWall || g.loginPage)) {
+    const state = g.notFound ? 'not_found'
+      : g.waf ? 'waf_blocked'
+      : (g.loginWall || g.loginPage) ? 'login_wall'
+      : 'slider_blocked';
+    return { title: item.title, company: item.company, btn: state, waf: !!g.waf };
   }
   const btn = await evalJson(cdp, APPLY_BTN, 15000);
   return {
@@ -460,14 +578,18 @@ export const notes = [
   '详情页连着访问约 5 次即触发滑块（正文文案「访问验证 / 请按住滑块，拖动到最右边」，标题「滑动验证页面」）；命中即停，约几分钟自行过期',
   'class 名每次构建都重新混淆（实测 acccc/accch/ahea/agbe…），本适配器一律语义定位',
   '卡片锚点是公司链接 /qiye/<id>.html，每卡恰好一个；靠它向上找整卡（从详情链接找会切半张卡）',
-  '详情页 URL 为 /zhaogong/{数字ID}/{token}.html，token 每次变，去重只能用数字ID',
+  '详情页 URL 为 /zhaogong/{数字ID}/{token}.html，token 每次变且有时效；去重只能用数字ID',
+  'token 过期会跳「页面找不到啦」→ 自动 recoverUrl() 用 ID 回列表页换新 token，捞不到才 not_found',
   '列表纯滚动懒加载，无翻页按钮；6 次滚动实测 16→105 条',
   '详情页薪资写作「8千-1.2万/月」，core/salary.mjs 解析为 0，必须由 normalize() 归一化（且单位只在一端时要继承）',
   '卡片区域 = 公司名的下一行；实测 40% 只写裸「苏州」，用正则猜地名会漏，进而被 cityOk() 整批误杀',
   '未登录时投递区退化为「点击登录，立即与老板沟通」；登录判据看右上角「登录丨注册」是否消失',
+  '投递区是「发送简历+免费聊」（未投）/「继续聊+拨打电话」（已投）两套文案，判据必须已投递优先',
   '详情页有两个「发送简历」（主区 + 相同职位推荐区），已加视口内+未遮挡过滤，防误点推荐位',
-  '投递按钮本体是 SPAN（无 onClick），靠 React root 事件委托 → JS click 有效，真实鼠标留作兜底',
-  '岗位招满会撤掉投递按钮并显示「已招满」→ result = closed，不进重投名单',
-  'URL 里的 token 过期会跳「页面找不到啦」→ result = not_found',
+  '投递按钮本体是 SPAN（无 onClick），靠 React root 事件委托 → JS click 有效（实测 via=js），真实鼠标仅作兜底',
+  '投递后按钮 3~8s 才变「继续聊」，必须轮询复核；固定等 2.2s 会误判 unknown（实战 5 条里 2 条已成功）',
+  '岗位招满会撤掉投递按钮并显示「已招满」→ result = closed（业务终态，不进重投名单）',
+  '只有「免费聊」无「发送简历」→ result = chat_only（该岗不收简历投递，别去点免费聊当投递）',
+  '判据链有纯逻辑单测：node scripts/test_yupaopin_btns.mjs（13 例，不依赖浏览器）',
   'PC 端消息中心能力未验证，chatSupported = false，登录后再补适配',
 ];

@@ -20,9 +20,13 @@ export async function apply(opts = {}) {
   let mode = 'apply';
 
   if (opts.retryLogs) {
-    // 重投模式：只挑上次未落库的条目
-    const prev = readJSON(opts.retryLogs, []) || [];
-    const bad = new Set(['unknown', 'quota_blocked', 'js_fail', 'no_btn', 'out_of_viewport', 'slider_blocked', 'risk_blocked', 'error']);
+    // 重投模式：只挑上次未落库的条目。
+    // 语义分类：
+    //   - 技术性失败（可重试）：unknown / js_fail / no_btn / slider_blocked / waf_blocked / out_of_viewport / error
+    //   - 业务性终态（不重投）：already(已投) / closed(已招满) / chat_only(不收简历) / not_found(token失效，重投仍失效)
+    //   - 需人工介入（不重投）：login_wall
+    // ⚠️ waf_blocked 必须在内：风控会自行过期，漏了会让这批岗位永远不再重试。
+    const bad = new Set(['unknown', 'quota_blocked', 'js_fail', 'no_btn', 'out_of_viewport', 'slider_blocked', 'waf_blocked', 'risk_blocked', 'error']);
     items = prev.filter((r) => bad.has(r.result));
     mode = 'retry';
     log(`重投模式：上次 ${prev.length} 条，其中 ${items.length} 条未落库`);
@@ -38,9 +42,16 @@ export async function apply(opts = {}) {
   const sink = createSink(file);
   const pace = paceOf(platform);
 
-  let ok = 0, already = 0, fail = 0, unknown = 0;
+  let ok = 0, already = 0, fail = 0, unknown = 0, skipped = 0;
   let stopped = null;
   let quota = null;
+
+  // 业务性终态：不是「投递失败」，是「这条不需要投」。单独计数，别混进 fail 拉低成功率。
+  const SKIP_RESULTS = new Set([
+    'closed',       // 已招满 / 下架
+    'chat_only',    // 该岗不收简历投递，只能聊
+    'not_found',    // 岗位已删除，恢复 token 也找不到
+  ]);
 
   log(`\n=== ${platform.label} 投递（${mode}）${items.length} 条｜节奏 ${pace.min / 1000}-${pace.max / 1000}s ===`);
   for (let i = 0; i < items.length; i++) {
@@ -49,21 +60,24 @@ export async function apply(opts = {}) {
     const tag = `[${i + 1}/${items.length}] ${(item.title || '').slice(0, 26)} ${item.sal || ''}`;
     try {
       const r = await platform.applyOne(cdp, item);
-      Object.assign(rec, r);
+      Object.assign(rec, r);          // 含 freshUrl（token 恢复后回填），随日志落盘供复用
       if (r.result === 'ok') ok++;
       else if (r.result === 'already') already++;
       else if (r.result === 'unknown') unknown++;
+      else if (SKIP_RESULTS.has(r.result)) skipped++;
       else fail++;
 
-      // 熔断：额度触顶 / 风控 / 滑块 → 立即停止，不空转
-      if (r.result === 'quota_blocked' || r.result === 'risk_blocked' || r.result === 'slider_blocked') {
+      // 熔断：额度触顶 / 风控 / 滑块 / WAF 挑战 → 立即停止，不空转。
+      // 缺 waf_blocked 会让每条都在被 WAF 拦时白跑一遍详情页；缺 login_wall 会把整批耗在登录页上。
+      const FUSE = ['quota_blocked', 'risk_blocked', 'slider_blocked', 'waf_blocked', 'login_wall'];
+      if (FUSE.includes(r.result)) {
         quota = r.quota || r.guard || null;
         stopped = r.result;
         log(`${tag} -> ⛔ ${r.result}${quota ? ' ' + JSON.stringify(quota) : ''} —— 停止本平台`);
         sink.push(rec);
         break;
       }
-      const mark = { ok: '✅', already: '⏭', unknown: '⚠️' }[r.result] || '❌';
+      const mark = { ok: '✅', already: '⏭', unknown: '⚠️', closed: '🚫', chat_only: '💬', not_found: '🚫' }[r.result] || '❌';
       log(`${tag} -> ${mark} ${r.result}`);
     } catch (e) {
       rec.result = 'error';
@@ -77,9 +91,9 @@ export async function apply(opts = {}) {
 
   sink.flush();
   cdp.close();
-  log(`\n===== ${platform.label} 投递完成：成功 ${ok} / 已沟通 ${already} / 未知 ${unknown} / 失败 ${fail} =====`);
+  log(`\n===== ${platform.label} 投递完成：成功 ${ok} / 已沟通 ${already} / 跳过 ${skipped} / 未知 ${unknown} / 失败 ${fail} =====`);
   if (stopped) log(`⚠️ 提前停止：${stopped} ${quota ? JSON.stringify(quota) : ''}`);
-  return { count: sink.rows.length, ok, already, unknown, fail, log: file, stopped, quota, rows: sink.rows };
+  return { count: sink.rows.length, ok, already, skipped, unknown, fail, log: file, stopped, quota, rows: sink.rows };
 }
 
 /**
