@@ -204,9 +204,21 @@ const FIND_APPLY = `(function(){
   return JSON.stringify({state:'ready', t:b.textContent.trim(), x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2)});
 })()`;
 
+/** 轮询等待右侧面板标题切换到目标（面板渲染比点击慢，实测需要 3-6s） */
+async function waitPanel(cdp, title, { tries = 8, gap = 800 } = {}) {
+  let panelTitle = '';
+  for (let i = 0; i < tries; i++) {
+    await sleep(i === 0 ? 1200 : gap);
+    const p = await evalJson(cdp, PANEL, 12000);
+    panelTitle = p ? p.title : '';
+    if (!title || !panelTitle || panelTitle === title) return { panelTitle, ready: true };
+  }
+  return { panelTitle, ready: false };
+}
+
 /**
  * 点开目标卡片（必须真实鼠标），返回面板标题。
- * 顺序：按标题定位 → 按序号兜底 → 面板标题复核。任何一步对不上都不猜。
+ * 顺序：按标题定位 → 按序号兜底；点击后轮询面板就位。任何一步对不上都不猜。
  */
 async function selectCard(cdp, item) {
   const attempts = [];
@@ -218,15 +230,11 @@ async function selectCard(cdp, item) {
     if (!pos) continue;
     await sleep(350);
     await clickAt(cdp, pos.x, pos.y);
-    await sleep(2200);
-    const p = await evalJson(cdp, PANEL, 12000);
-    const panelTitle = p ? p.title : '';
-    if (!item.title || !panelTitle || panelTitle === item.title) {
-      return { ok: true, panelTitle, byTitle: expr === attempts[0] };
-    }
+    const w = await waitPanel(cdp, item.title);
+    if (w.ready) return { ok: true, panelTitle: w.panelTitle };
   }
-  const p = await evalJson(cdp, PANEL, 12000);
-  return { ok: false, why: 'panel_mismatch', panelTitle: p ? p.title : '' };
+  const w = await waitPanel(cdp, null, { tries: 2 });
+  return { ok: false, why: 'panel_mismatch', panelTitle: w.panelTitle };
 }
 
 export async function applyOne(cdp, item) {

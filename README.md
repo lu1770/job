@@ -47,6 +47,35 @@ job/
 └─ legacy/             旧脚本归档（勿改）
 ```
 
+## 平台定位模型（两种，别混用）
+
+| 模型 | 平台 | normalize 产出 | apply 路径 |
+|---|---|---|---|
+| `detailStrategy: 'url'`（默认） | BOSS / 猎聘 / 51job | `url` + `id` | 导航详情页 → 点按钮 |
+| `detailStrategy: 'panel'` | **智联** | `cardIndex` + `cardKey`，**无 url** | 回搜索页 → 点卡片 → 右侧详情面板 |
+
+**智联为什么没有 URL**：实测 `.job-card` 卡片里唯一的 `<a>` 是公司页 `companydetail/CZxxxx.htm`，
+不存在 `/jobdetail/<id>` 这类链接。早期用正则 `/jobdetail\/(\d+)/` 抠 ID，结果长期恒为 0 ——
+不是正则写错，而是这个平台上根本不存在这种 URL。
+
+因此：
+- `normalize()` 返回 `cardKey`（`标题|薪资|公司` 指纹）作为 `id`，`url` 留空；
+- 去重走 `dedupe.mjs` 的 `keyOf`，不依赖 URL（`commands/history.mjs` 里 `idRe: null`）；
+- 定位靠**标题匹配 + 面板标题复核**（卡片序号每次加载都会漂移，序号只作兜底）；
+- JD 正文只从 `.job-detail-modules__detail` 读 —— 读整页会把推荐位/页脚关键词全命中，导致每个岗位看起来都像 .NET。
+
+新增平台若卡片里没有详情链接，就用 `detailStrategy = 'panel'` + `cardKey`。
+
+## URL / ID 解析工具（`src/core/url.mjs`）
+
+```js
+absUrl(href, base)          // 相对 / 协议相对 / 缺 scheme → 绝对 URL；取不到返回 null
+jobIdFrom(url, {patterns})  // 多模式依次尝试 → 最后一段有效路径兜底 → 取不到返回 null
+fingerprint({title,company,salary})  // 无 URL 平台的稳定去重键
+```
+
+约定：**取不到就返回 `null`，绝不返回半截字符串**；调用方据此切换到指纹去重或面板模型。
+
 ## 分层约定
 
 1. **core/** 不含任何平台选择器；
