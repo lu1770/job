@@ -38,7 +38,7 @@ export function buildHistory({
   include = DEFAULT_INCLUDE,
   exclude = DEFAULT_EXCLUDE,
   idRe = /\/([0-9a-zA-Z_-]{8,})\.shtml/,
-  hostRe = /liepin\.com|zhipin\.com|51job\.com|zhaopin\.com/,
+  hostRe = /liepin\.com|zhipin\.com|51job\.com|zhaopin\.com|yupao\.com/,
   keyOf = (j) => [(j.title || j.name || '').trim(), (j.sal || j.salary || '').trim()].filter(Boolean).join('||'),
 }) {
   const ids = new Set();

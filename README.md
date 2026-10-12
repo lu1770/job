@@ -1,10 +1,11 @@
 # 求职投递自动化（job-apply-automation）
 
-BOSS 直聘 / 猎聘 / 智联招聘 / 前程无忧 51job 的批量搜索与投递流水线。
+BOSS 直聘 / 猎聘 / 智联招聘 / 前程无忧 51job / **鱼泡直聘** 的批量搜索与投递流水线。
 **零第三方依赖**，直接用 Node 内置 WebSocket 驱动原生 CDP。
 
 > 2026-10-10 由 88 个一次性脚本重构而来：代码与数据分离、重复功能合并为 4 层架构。
 > 旧脚本见 `legacy/MAPPING.md`（含合并映射）。
+> 2026-10-13 新增鱼泡直聘（`platforms/yupaopin.mjs`）。
 
 ---
 
@@ -35,9 +36,11 @@ job/
 │  │  ├─ salary.mjs      薪资解析（K/万/年/元 统一）
 │  │  ├─ criteria.mjs    屏蔽名单 / 标题相关性 / 技术栈 / 年龄限制
 │  │  ├─ age.mjs         年龄限制探测器
+│  │  ├─ pagejs.mjs      页面内 JS 表达式生成器（会话定位 / 滚动，选择器由平台传入）
+│  │  ├─ readjd.mjs      JD 读取工厂（标题+正文 → techFlags/年龄判定，各平台共用）
 │  │  └─ dedupe.mjs      跨轮次去重集合
 │  ├─ platforms/        平台适配器（唯一知道 DOM 选择器的地方）
-│  │  ├─ boss.mjs  liepin.mjs  job51.mjs  zhaopin.mjs  index.mjs
+│  │  ├─ boss.mjs  liepin.mjs  job51.mjs  zhaopin.mjs  yupaopin.mjs  index.mjs
 │  └─ commands/         业务流程（跨平台复用）
 │     ├─ login.mjs  scan.mjs  jd.mjs  targets.mjs
 │     ├─ apply.mjs（含 verify / --probe）  chat.mjs  history.mjs  daily.mjs
@@ -51,7 +54,7 @@ job/
 
 | 模型 | 平台 | normalize 产出 | apply 路径 |
 |---|---|---|---|
-| `detailStrategy: 'url'`（默认） | BOSS / 猎聘 / 51job | `url` + `id` | 导航详情页 → 点按钮 |
+| `detailStrategy: 'url'`（默认） | BOSS / 猎聘 / 51job / **鱼泡** | `url` + `id` | 导航详情页 → 点按钮 |
 | `detailStrategy: 'panel'` | **智联** | `cardIndex` + `cardKey`，**无 url** | 回搜索页 → 点卡片 → 右侧详情面板 |
 
 **智联为什么没有 URL**：实测 `.job-card` 卡片里唯一的 `<a>` 是公司页 `companydetail/CZxxxx.htm`，
@@ -65,6 +68,54 @@ job/
 - JD 正文只从 `.job-detail-modules__detail` 读 —— 读整页会把推荐位/页脚关键词全命中，导致每个岗位看起来都像 .NET。
 
 新增平台若卡片里没有详情链接，就用 `detailStrategy = 'panel'` + `cardKey`。
+
+## 鱼泡直聘（2026-10-13 新增）
+
+```bash
+node src/cli.mjs login --platform yupaopin
+node src/cli.mjs scan  --platform yupaopin --keywords ".NET,C#,上位机"
+node src/cli.mjs verify --platform yupaopin --probe    # 只读巡检，不点击
+```
+
+与另外四个平台不同的几件事：
+
+1. **有阿里云 WAF + 滑块验证**。`curl` 只能拿到 4.8KB 挑战页（HTML 里没有任何职位内容），
+   本适配器**只能走 CDP 真实浏览器**。且**详情页连着访问约 5 次即触发滑块**，
+   滑块页正文是「访问验证 / 请按住滑块，拖动到最右边」（标题才是「滑动验证页面」，
+   按 `滑动验证` 判会漏检 → 误报 `no_btn`），命中即停，约几分钟自行过期。
+2. **class 名每次构建都重新混淆**（实测 `acccc` / `accch` / `ahea` / `agbe`…）。
+   因此适配器内**不写任何 class 选择器**，一律语义定位：
+   - 卡片锚点 = **公司链接 `/qiye/<id>.html`**（每张卡片恰好一个），
+     从它向上找到「1 个 `/qiye/` + ≤1 个 `/zhaogong/` + 高度 90~420 + 文本含『元/』」的容器 = 整卡。
+     （从详情链接向上找会切到半张卡，实测过。）
+   - 卡片文本行序固定：行0=标题、行1=薪资，其后为标签/公司/**区域**。
+     区域要取「公司名的下一行」——实测 40% 只写裸「苏州」，用正则猜地名会漏，
+     而 `cityOk()` 靠它判城市，漏了会被整批误杀。`normalizeLoc()` 会给
+     `昆山市`/`常熟市` 这类下辖市补上「苏州·」前缀，否则同样被误判成非苏州。
+3. **URL 里的 token 每次都变**：详情页是 `/zhaogong/{数字ID}/{随机token}.html`，
+   去重只能用**数字ID**。各适配器统一导出 `ID_RE`（`scan.mjs` / `history.mjs` 都从这里取，
+   不要在命令层再写一份正则）。鱼泡的是 `/(?:yupao\.com)?\/zhaogong\/(\d+)/` ——
+   **必须只捕获数字段**（写 `(.+)` 会把随机 token 当成岗位 ID，去重直接失效），
+   host 部分做成可选是因为采集产物里 `href` 是站内相对路径。
+   token 失效会跳「页面找不到啦」→ `result = not_found`。
+4. **薪资需要适配器归一化**：详情页写作 `8千-1.2万/月`，
+   `core/salary.mjs` 解析为 **0**（会让所有高薪岗被 25K 阈值误杀），
+   故 `normalize()` 先把区间两端各自换算成「元/月」再交给 core 复算；
+   且鱼泡常只在一端带单位（`1-1.2万`），另一端必须继承，否则上限算成 0.12K。
+5. **岗位招满会撤掉投递按钮**，只在标题区留「已招满」→ `result = closed`，
+   不进重投名单（`apply.mjs` 的 `bad` 集合里没有 `closed`）。
+
+列表是**纯滚动懒加载、无翻页按钮**（实测 6 次滚动 16→105 条）。
+详情页有**两个「发送简历」**（主区 + 「相同职位推荐」区，后者在视口外 y=-1382），
+按钮定位统一加「视口内 + `elementFromPoint` 未被遮挡」双条件，防误点推荐位。
+
+登录态判据：右上角「登录丨注册」= 游客；「消息 / 简历 / 路正遥」= 已登录（本机实测已登录）。
+`chatSupported = false` —— PC 端消息中心能力未验证，登录后需补适配。
+
+实测：`scan --keywords "上位机,WPF,WinForm"` → 153 岗 / 55 个 ≥25K；
+`jd --limit 6` → 6 条全部识别出 dotnet·wpf·upper·motion·mes；
+`targets` → 入选 5、剔除 1（「固件开发工程师」被嵌入式规则正确拦下）；
+`verify --probe` → 5 条全部返回真实状态（2 条 `closed:已招满`、3 条 `ready:发送简历`）。
 
 ## URL / ID 解析工具（`src/core/url.mjs`）
 
@@ -81,7 +132,11 @@ fingerprint({title,company,salary})  // 无 URL 平台的稳定去重键
 1. **core/** 不含任何平台选择器；
 2. **platforms/** 只做「页面 ↔ 结构化数据」的翻译，外加 `applyOne` / `sendMessage` / `readConversation`；
 3. **commands/** 只做编排：筛选、节奏、落盘、熔断、汇总；
-4. 新增平台 = 新增一个 `platforms/xxx.mjs` 并在 `index.mjs` 注册，流水线零改动。
+4. **新增平台 = 新增一个 `platforms/xxx.mjs` 并在 `index.mjs` 注册**，流水线零改动。
+   适配器接口：`id, label, DEFAULT_KEYWORDS, ID_RE, searchUrl?(kw), scanKeyword(cdp,kw),
+   normalize?(items), readJd(cdp), applyOne(cdp,item), probeItem?(cdp,item),
+   guard?(cdp), pace?, VIEWPORT?, chatSupported?`。
+   `ID_RE` 是岗位 ID 正则的唯一来源，命令层不许再写平台专属正则。
 
 ## 命令参考
 
@@ -101,15 +156,22 @@ fingerprint({title,company,salary})  // 无 URL 平台的稳定去重键
 ## 业务铁律（写进代码，勿绕过）
 
 1. **绝不调用 `Runtime.enable` / `Page.enable` / `DOM.enable`** —— 反爬头号指纹，会被秒关标签页。
-2. **投递点击方式按平台区分**：BOSS/猎聘/智联只认 **JS click**；51job 相反，必须**真实鼠标**。
+2. **投递点击方式按平台区分**：BOSS/猎聘/智联/鱼泡只认 **JS click**；51job 相反，必须**真实鼠标**。
 3. **窗口最小化会让所有真实鼠标点击静默失效** → `session()` 已强制 `Emulation.setFocusEmulationEnabled` + 视口覆盖。
-4. **本机 OS 缩放 150%**：实际 CSS 视口 = 设定值 ÷ 1.5，51job 必须用 `wide(2400×1500)`。
+4. **本机 OS 缩放 150%**：实际 CSS 视口 = 设定值 ÷ 1.5，51job / 鱼泡必须用 `wide(2400×1500)`。
 5. **验证码/滑块/短信验证绝不绕过**，一律停下交人工。
 6. **已投判据必须精确读按钮文本**：BOSS `a.btn-startchat` = `立即沟通`/`继续沟通`；
-   猎聘 = `聊一聊`/`继续聊`。页面正文里的「沟通过/已投递」字样来自推荐位，**不可作判据**。
+   猎聘 = `聊一聊`/`继续聊`；鱼泡 = `发送简历`/`已投递`。页面正文里的「沟通过/已投递」字样来自推荐位，**不可作判据**。
 7. **额度与风控熔断**：BOSS 当日沟通 150 次上限，触顶弹「温馨提示」且点击失效；
    猎聘约 120 次详情页访问触发「账号行为异常」。两者命中即停该平台。
+   鱼泡详情页连访约 5 次即触发阿里云滑块（`result = 'slider_blocked'`），命中即停；
+   `acw_sc__v2` 挑战页则 `result = 'waf_blocked'`。
 8. **沟通口径**：只回实质提问；客套与婉拒不回；遇授权卡（简历/联系方式/微信）先索要 JD，绝不代点。
+9. **不写 class 选择器，除非该平台 class 不混淆**。鱼泡每次构建重新混淆 class，
+   用 `acccc` 这类名字写选择器等于埋雷；一律走 href 形态 + 文本 + 几何尺寸的语义定位。
+10. **区分「业务上投不了」和「技术上没找到」**。鱼泡招满 → `closed`；
+    token 失效 → `not_found`；被滑块拦 → `slider_blocked`。
+    三者若都笼统报 `no_btn`，`apply.mjs` 会把它们塞进重投名单反复空转。
 
 ## 扩展配置
 

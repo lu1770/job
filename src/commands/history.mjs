@@ -10,14 +10,17 @@
  */
 import { buildHistory, saveHistory, loadHistory, keyByTitleCompany, keyByTitleSalary } from '../core/dedupe.mjs';
 import { DATA, ROOT } from '../core/io.mjs';
+import { PLATFORMS } from '../platforms/index.mjs';
 import path from 'node:path';
 
+// idRe 统一来自平台适配器的 ID_RE（智联 ID_RE=null：卡片内无详情 URL，靠指纹去重）
 const PROFILES = {
-  boss: { idRe: /job_detail\/([^.]+)\.html/, hostRe: /zhipin\.com/, keyOf: keyByTitleCompany },
-  liepin: { idRe: /liepin\.com\/(?:a|job)\/(\d+)\.shtml/, hostRe: /liepin\.com/, keyOf: keyByTitleSalary },
-  job51: { idRe: /51job\.com\/all\/(\d+)\.html/, hostRe: /51job\.com/, keyOf: keyByTitleSalary },
-  // 智联卡片内没有职位详情 URL（唯一 <a> 是公司页），故 idRe=null，靠「标题|薪资|公司」指纹去重
-  zhaopin: { idRe: null, hostRe: /zhaopin\.com/, keyOf: (j) => j.cardKey || [j.title, j.sal, j.company].map((x) => String(x || '').trim()).join('|') },
+  boss: { hostRe: /zhipin\.com/, keyOf: keyByTitleCompany },
+  liepin: { hostRe: /liepin\.com/, keyOf: keyByTitleSalary },
+  job51: { hostRe: /51job\.com/, keyOf: keyByTitleSalary },
+  zhaopin: { hostRe: /zhaopin\.com/, keyOf: (j) => j.cardKey || [j.title, j.sal, j.company].map((x) => String(x || '').trim()).join('|') },
+  // 鱼泡 URL 为 /zhaogong/{数字ID}/{随机token}.html —— token 每次变，idRe 见 yupaopin.mjs 的 ID_RE
+  yupaopin: { hostRe: /yupao\.com/, keyOf: keyByTitleCompany },
 };
 
 export async function rebuildHistory(opts = {}) {
@@ -29,7 +32,7 @@ export async function rebuildHistory(opts = {}) {
   const dirs = [DATA.raw, DATA.work, DATA.lists, DATA.logs];
   if (opts.fromLegacy) dirs.push(path.join(ROOT, 'legacy'));
 
-  const history = buildHistory({ dirs, ...p });
+  const history = buildHistory({ dirs, idRe: PLATFORMS[pid]?.ID_RE ?? p.idRe ?? null, ...p });
   saveHistory(pid, history);
   log(`【${pid}】去重集合：岗位 id ${history.ids.length} 个｜标题键 ${history.keys.length} 个 -> ${path.join(DATA.history, `${pid}-history.json`)}`);
   return history;

@@ -5,8 +5,9 @@
  */
 import { session } from '../core/session.mjs';
 import { parseList } from '../platforms/index.mjs';
-import { dataPath, writeJSONAtomic, stamp } from '../core/io.mjs';
+import { dataPath, writeJSONAtomic } from '../core/io.mjs';
 import { capK } from '../core/salary.mjs';
+import { firstMatch } from '../core/url.mjs';
 import { sleep } from '../core/cdp.mjs';
 
 export async function scan(opts = {}) {
@@ -38,7 +39,7 @@ export async function scan(opts = {}) {
     let items = platform.normalize ? platform.normalize(res.items) : res.items;
     let added = 0;
     for (const j of items) {
-      const id = jobId(j);
+      const id = jobId(platform, j);
       if (!id || seen.has(id)) continue;
       seen.add(id);
       all.push({ ...j, id, kw, capK: capK(j.sal || j.salary), url: j.url || j.href });
@@ -65,12 +66,12 @@ async function scanWithSort(cdp, platform, kw) {
   return platform.scanPage(cdp, kw);
 }
 
-function jobId(j) {
+/** 岗位 id：条目自带 id 优先，其次按平台 ID_RE 从 URL 提取（与 history 同一份正则） */
+function jobId(platform, j) {
   if (j.id) return j.id;
   if (j.jobId) return j.jobId;
-  const m = String(j.href || j.url || '').match(/job_detail\/([^.]+)\.html/) || String(j.href || j.url || '').match(/liepin\.com\/(?:a|job)\/(\d+)/) || String(j.href || j.url || '').match(/jobdetail\/(\d+)/);
-  return m ? m[1] : (j.href || j.url || '');
+  const href = j.href || j.url || '';
+  return (platform.ID_RE && firstMatch(href, [platform.ID_RE])) || href || '';
 }
 
-export const help = 'scan --platform <boss|liepin|job51|zhaopin> [--keywords "a,b"] [--cap 25] [--tab <id>]';
-export { stamp };
+export const help = 'scan --platform <boss|liepin|job51|zhaopin|yupaopin> [--keywords "a,b"] [--cap 25] [--tab <id>]';

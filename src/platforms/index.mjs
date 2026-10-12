@@ -7,11 +7,12 @@ import * as boss from './boss.mjs';
 import * as liepin from './liepin.mjs';
 import * as job51 from './job51.mjs';
 import * as zhaopin from './zhaopin.mjs';
+import * as yupaopin from './yupaopin.mjs';
 
-export const PLATFORMS = { boss, liepin, job51, zhaopin };
+export const PLATFORMS = { boss, liepin, job51, zhaopin, yupaopin };
 
-/** 默认优先级：猎聘 + BOSS 为每日主投平台 */
-export const PRIORITY = ['liepin', 'boss', 'zhaopin', 'job51'];
+/** 默认优先级：猎聘 + BOSS 为每日主投平台；鱼泡为补充池（苏州本地岗位密度高） */
+export const PRIORITY = ['liepin', 'boss', 'zhaopin', 'job51', 'yupaopin'];
 
 export function getPlatform(id) {
   const p = PLATFORMS[id];

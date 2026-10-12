@@ -7,8 +7,8 @@
  * 用法：node src/cli.mjs jd --platform boss --in data/raw/boss-scan-xxx.json
  */
 import { session } from '../core/session.mjs';
-import { dataPath, readJSON, latestDataFile, createSink, stamp } from '../core/io.mjs';
-import { sleep } from '../core/cdp.mjs';
+import { dataPath, readJSON, latestDataFile, createSink } from '../core/io.mjs';
+import { sleep, navigate } from '../core/cdp.mjs';
 import { capK } from '../core/salary.mjs';
 import { blockedCompany, coarseScreen, requireScreen, cityOk, criteria } from '../core/criteria.mjs';
 import { loadHistory, historyIndex, isSeen, keyByTitleSalary, keyByTitleCompany } from '../core/dedupe.mjs';
@@ -24,7 +24,9 @@ export async function jd(opts = {}) {
 
   // ---- 前置过滤（不进详情页）
   const hist = historyIndex(loadHistory(pid));
-  const keyFn = pid === 'boss' ? keyByTitleCompany : keyByTitleSalary;
+  // 鱼泡同标题同薪资的岗位很多（如「软件工程师 1.1-1.6万」在不同公司），
+  // 用「标题+薪资」会误杀，必须像 BOSS 一样按「标题+公司」消歧。
+  const keyFn = (pid === 'boss' || pid === 'yupaopin') ? keyByTitleCompany : keyByTitleSalary;
   const dropped = [];
   let cand = [];
   for (const j of base) {
@@ -61,11 +63,7 @@ export async function jd(opts = {}) {
       } else {
         const url = platform.resolveUrl ? platform.resolveUrl(j) : (j.url || j.href);
         if (!url) rec.err = 'no_url';
-        else {
-          await cdp.send('Page.navigate', { url });
-          await waitReady(cdp);
-          await sleep(900);
-        }
+        else await navigate(cdp, url, { settle: 900 });
       }
       const d = rec.err ? null : await platform.readJd(cdp);
       if (!d) { if (!rec.err) rec.err = 'read_failed'; }
@@ -98,15 +96,4 @@ export async function jd(opts = {}) {
   return { file, count: sink.rows.length, stopped, dropped };
 }
 
-async function waitReady(cdp) {
-  for (let i = 0; i < 30; i++) {
-    await sleep(400);
-    try {
-      const r = await cdp.send('Runtime.evaluate', { expression: 'document.readyState', returnByValue: true });
-      if (r.result && r.result.value === 'complete') return;
-    } catch { /* 渲染中 */ }
-  }
-}
-
 export const help = 'jd --platform <id> [--in <scan.json>] [--cap 25] [--no-dedupe] [--limit N] [--tab <id>]';
-export { stamp };
