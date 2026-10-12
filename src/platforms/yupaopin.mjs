@@ -23,7 +23,7 @@
  *    否则会当 no_btn 无限重投。token 失效时 URL 跳「页面找不到」，也别当投递失败。
  */
 import { evalJson, evalJs, sleep, clickAt, navigate, rand } from '../core/cdp.mjs';
-import { techFlags, detectAgeLimit } from '../core/criteria.mjs';
+import { withFlags } from '../core/readjd.mjs';
 import { parseSalary } from '../core/salary.mjs';
 
 export const id = 'yupaopin';
@@ -311,15 +311,7 @@ export async function readJd(cdp) {
       bodyLen: document.body?document.body.innerText.length:0
     });
   })()`, 25000);
-  if (!d) return null;
-  return {
-    jdTitle: d.title,
-    flags: techFlags(d.body),
-    ageLimit: detectAgeLimit(d.body),
-    body: d.body,
-    scoped: d.scoped,
-    pageLen: d.bodyLen,
-  };
+  return withFlags(d);
 }
 
 // ---------------------------------------------------------------- 投递

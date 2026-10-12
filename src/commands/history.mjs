@@ -32,7 +32,7 @@ export async function rebuildHistory(opts = {}) {
   const dirs = [DATA.raw, DATA.work, DATA.lists, DATA.logs];
   if (opts.fromLegacy) dirs.push(path.join(ROOT, 'legacy'));
 
-  const history = buildHistory({ dirs, idRe: PLATFORMS[pid]?.ID_RE ?? p.idRe ?? null, ...p });
+  const history = buildHistory({ dirs, idRe: PLATFORMS[pid]?.ID_RE ?? null, ...p });
   saveHistory(pid, history);
   log(`【${pid}】去重集合：岗位 id ${history.ids.length} 个｜标题键 ${history.keys.length} 个 -> ${path.join(DATA.history, `${pid}-history.json`)}`);
   return history;
