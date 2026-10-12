@@ -9,8 +9,12 @@
  *    页面正文出现的「沟通过 / 已投递」来自推荐位等元素，不可作判据；
  *  - 存在当日沟通总量上限（150 次/日），触顶后弹「温馨提示」且按钮点击不再生效。
  */
-import { evalJson, evalJs, sleep, clickAt, navigate, rand } from '../core/cdp.mjs';
-import { techFlags, detectAgeLimit } from '../core/criteria.mjs';
+import { evalJson, evalJs, sleep, clickAt, navigate } from '../core/cdp.mjs';
+import { makeReadJd } from '../core/readjd.mjs';
+import { exprFindConv, exprScrollBottom } from '../core/pagejs.mjs';
+
+/** 从详情 URL 提取岗位 id（scan / history 共用） */
+export const ID_RE = /job_detail\/([^.]+)\.html/;
 
 export const id = 'boss';
 export const label = 'BOSS 直聘';
@@ -112,15 +116,7 @@ export function normalize(items) {
 
 // ---------------------------------------------------------------- JD
 
-export async function readJd(cdp) {
-  const d = await evalJson(cdp, `(function(){
-    const t=(document.body?document.body.innerText:'').replace(/\\n{2,}/g,'\\n');
-    const h=document.querySelector('h1')||document.querySelector('.job-name');
-    return JSON.stringify({ title:h?h.innerText.trim():'', body:t.slice(0,5000) });
-  })()`, 20000);
-  if (!d) return null;
-  return { jdTitle: d.title, flags: techFlags(d.body), ageLimit: detectAgeLimit(d.body), body: d.body };
-}
+export const readJd = makeReadJd({ head: `document.querySelector('h1')||document.querySelector('.job-name')` });
 
 // ---------------------------------------------------------------- 投递
 
@@ -194,45 +190,9 @@ const CONV_ITEMS = `(function(){
   }));
 })()`;
 
-const SCROLL_TO_ITEM = (idx) => `(function(){
-  const items=[...document.querySelectorAll('li')].filter(li=>li.querySelector('.friend-content-warp'));
-  const el=items[${idx}]; if(!el) return 'no';
-  let p=el.parentElement;
-  while(p&&p!==document.body){ if(p.scrollHeight>p.clientHeight+5) break; p=p.parentElement; }
-  if(p&&p!==document.body){ const r=el.getBoundingClientRect(),cr=p.getBoundingClientRect(); p.scrollTop += (r.top-cr.top-120); }
-  const w=el.querySelector('.friend-content-warp'); const r=w.getBoundingClientRect();
-  return JSON.stringify({x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),w:Math.round(r.width)});
-})()`;
-
-const CHAT_BOTTOM = `(function(){
-  const li=document.querySelector('li.message-item'); if(!li) return 'no-item';
-  let p=li.parentElement;
-  while(p&&p!==document.body){ if(p.scrollHeight>p.clientHeight+5) break; p=p.parentElement; }
-  if(p&&p!==document.body){ p.scrollTop=p.scrollHeight; return 'ok'; }
-  return 'no-scroller';
-})()`;
-
-const CHAT_READ = `(function(){
-  const conv=document.querySelector('.chat-conversation');
-  const placeholder=conv?/与您进行过沟通的 Boss 都会在左侧列表中显示/.test(conv.innerText):true;
-  // 只取真实消息：PK/竞争力分析等系统卡片虽然也是 li.message-item 且带 .message-content，
-  // 但文案固定，按文案剔除；另外去掉正文里混入的「已读/送达」状态前缀。
-  const SYS=/竞争者PK|查看详细分析|共人投递|你超过竞争者|竞争力分析|你与该职位/;
-  const msgs=[...document.querySelectorAll('li.message-item')]
-    .map(li=>({
-      me: li.classList.contains('item-myself'),
-      time:(li.querySelector('.item-time')||{innerText:''}).innerText.trim(),
-      status:(li.querySelector('.message-status')||{innerText:''}).innerText.trim(),
-      text:(li.querySelector('.message-content')||li).innerText.trim().slice(0,300)
-    }))
-    .filter(m=>m.text && !SYS.test(m.text))
-    .map(m=>({...m, text:m.text.replace(/^(已读|送达|已读\\s*送达)\\s*/,'').trim()}))
-    .filter(m=>m.text);
-  const dialogs=[...document.querySelectorAll('.item-dialog')].map(d=>{const r=d.getBoundingClientRect();
-    return (r.width>10)?{w:Math.round(r.width),h:Math.round(r.height),text:d.innerText.trim().slice(0,120)}:null;}).filter(Boolean);
-  return JSON.stringify({placeholder, msgs:msgs.slice(-12), dialogs,
-    head: conv?conv.innerText.replace(/\\s*\\n\\s*/g,' | ').slice(0,140):''});
-})()`;
+/** 会话列表定位参数（虚拟化列表，索引会漂移，须按文本定位） */
+const CONV = { items: 'li', itemHas: '.friend-content-warp', clickSel: '.friend-content-warp', offset: 120 };
+const CONV_COUNT = `document.querySelectorAll('li .friend-content-warp').length`;
 
 export async function openChat(cdp) {
   await evalJs(cdp, `location.href='${CHAT_URL}'; "ok"`, 12000);
@@ -242,12 +202,10 @@ export async function openChat(cdp) {
 export async function listConversations(cdp, { unreadOnly = false, loadMore = 8 } = {}) {
   await openChat(cdp);
   for (let i = 0; i < loadMore; i++) {
-    const n = await evalJs(cdp, `document.querySelectorAll('li .friend-content-warp').length`);
-    await evalJs(cdp, `(function(){const li=document.querySelector('li .friend-content-warp');if(!li)return 'no';
-      let p=li.parentElement; while(p&&p!==document.body){if(p.scrollHeight>p.clientHeight+5)break;p=p.parentElement;}
-      if(p&&p!==document.body)p.scrollTop=p.scrollHeight; return 'ok';})()`);
+    const n = await evalJs(cdp, CONV_COUNT);
+    await evalJs(cdp, exprScrollBottom('li .friend-content-warp'));
     await sleep(1200);
-    const n2 = await evalJs(cdp, `document.querySelectorAll('li .friend-content-warp').length`);
+    const n2 = await evalJs(cdp, CONV_COUNT);
     if (n2 === n && i > 2) break;
   }
   const list = (await evalJson(cdp, CONV_ITEMS, 25000)) || [];
@@ -262,19 +220,7 @@ export async function listConversations(cdp, { unreadOnly = false, loadMore = 8 
 export async function readConversation(cdp, target, { retries = 3 } = {}) {
   const key = typeof target === 'string' ? target : target.name;
   const fallbackIdx = typeof target === 'object' ? target.i : -1;
-
-  const locate = (byName) => (byName && key ? `(function(){
-    const items=[...document.querySelectorAll('li')].filter(li=>li.querySelector('.friend-content-warp'));
-    for(const el of items){
-      if((el.innerText||'').indexOf(${JSON.stringify(key)})<0) continue;
-      let p=el.parentElement;
-      while(p&&p!==document.body){ if(p.scrollHeight>p.clientHeight+5) break; p=p.parentElement; }
-      if(p&&p!==document.body){ const r=el.getBoundingClientRect(),cr=p.getBoundingClientRect(); p.scrollTop += (r.top-cr.top-120); }
-      const w=el.querySelector('.friend-content-warp'); const r=w.getBoundingClientRect();
-      return JSON.stringify({x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),w:Math.round(r.width)});
-    }
-    return 'null';
-  })()` : SCROLL_TO_ITEM(fallbackIdx));
+  const locate = (byName) => exprFindConv({ ...CONV, text: byName && key ? key : null, index: fallbackIdx });
 
   let head = '';
   for (let a = 0; a < retries; a++) {
@@ -283,7 +229,7 @@ export async function readConversation(cdp, target, { retries = 3 } = {}) {
       if (!pos || pos.w < 20) { await sleep(700); continue; }
       await clickAt(cdp, pos.x, pos.y);
       await sleep(2600);
-      for (let s = 0; s < 3; s++) { await evalJs(cdp, CHAT_BOTTOM); await sleep(500); }
+      for (let s = 0; s < 3; s++) { await evalJs(cdp, exprScrollBottom('li.message-item')); await sleep(500); }
       const got = await evalJson(cdp, CHAT_READ, 20000);
       if (!got || got.placeholder) { await sleep(800); continue; }
       head = got.head || '';
@@ -297,25 +243,12 @@ export async function readConversation(cdp, target, { retries = 3 } = {}) {
 
 /** 发送消息（带"会话确已打开"校验，防发错人）。input 用 execCommand 填充；发送按钮必须精确选择器 + 真实点击 */
 export async function sendMessage(cdp, { key, verify, text, retries = 3 }) {
-  const find = (k) => `(function(){
-    const items=[...document.querySelectorAll('li')].filter(li=>li.querySelector('.friend-content-warp'));
-    for(const el of items){
-      if((el.innerText||'').indexOf(${JSON.stringify(k)})<0) continue;
-      let p=el.parentElement;
-      while(p&&p!==document.body){ if(p.scrollHeight>p.clientHeight+5) break; p=p.parentElement; }
-      if(p&&p!==document.body){ const r=el.getBoundingClientRect(),cr=p.getBoundingClientRect(); p.scrollTop += (r.top-cr.top-120); }
-      const w=el.querySelector('.friend-content-warp'); const r=w.getBoundingClientRect();
-      return JSON.stringify({x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),w:Math.round(r.width),
-                             txt:(el.innerText||'').replace(/\\s*\\n\\s*/g,' | ').slice(0,160)});
-    }
-    return 'null';
-  })()`;
   const headExpr = `(function(){const c=document.querySelector('.chat-conversation');
     return c?c.innerText.replace(/\\s*\\n\\s*/g,' | ').slice(0,140):'';})()`;
 
   let opened = false, head = '', found = null;
   for (let a = 0; a < retries && !opened; a++) {
-    const pos = await evalJson(cdp, find(key), 12000);
+    const pos = await evalJson(cdp, exprFindConv({ ...CONV, text: key }), 12000);
     if (!pos) return { result: 'conv_not_found' };
     found = pos.txt;
     await clickAt(cdp, pos.x, pos.y);

@@ -12,8 +12,11 @@
  *  - 去重靠 cardKey（跨轮次稳定），不靠 URL。
  */
 import { evalJson, evalJs, sleep, clickAt, navigate } from '../core/cdp.mjs';
-import { techFlags, detectAgeLimit } from '../core/criteria.mjs';
+import { makeReadJd } from '../core/readjd.mjs';
 import { fingerprint } from '../core/url.mjs';
+
+/** 智联卡片内没有职位详情 URL，id 靠 cardKey 指纹，不走 URL 正则 */
+export const ID_RE = null;
 
 export const id = 'zhaopin';
 export const label = '智联招聘';
@@ -120,11 +123,8 @@ export function normalize(items) {
  * 由 pipeline 统一调用；返回面板标题用于校验。
  */
 export async function openJob(cdp, item) {
-  await navigate(cdp, searchUrl(item.kw || '.NET'), { settle: 3200 });
-  await sortBySalary(cdp);
-  await sleep(3000);
-  const sel = await selectCard(cdp, item);
-  return sel;
+  await backToSearch(cdp, item.kw);
+  return selectCard(cdp, item);
 }
 
 /**
@@ -132,30 +132,16 @@ export async function openJob(cdp, item) {
  * 整页含搜索列表、推荐职位、页脚，techFlags 会把里面的关键词全命中，
  * 导致每个岗位都「看起来像 C#/上位机」（实测 flags 全量误命中）。
  */
-export async function readJd(cdp) {
-  const d = await evalJson(cdp, `(function(){
-    const h=document.querySelector('.job-detail-summary__title-text')||document.querySelector('h1');
-    const panel=document.querySelector('.job-detail-modules__detail')
-             ||document.querySelector('.job-detail-modules')
-             ||document.querySelector('.job-detail-summary');
-    const scope=panel||document.body;
-    const t=(scope.innerText||'').replace(/\\n{2,}/g,'\\n');
-    return JSON.stringify({
-      title:h?(h.innerText||'').trim():'',
-      body:t.slice(0,5000),
-      scoped: !!panel,
-      bodyLen:(document.body?document.body.innerText.length:0)
-    });
-  })()`, 20000);
-  if (!d) return null;
-  return {
-    jdTitle: d.title,
-    flags: techFlags(d.body),
-    ageLimit: detectAgeLimit(d.body),
-    body: d.body,
-    scoped: d.scoped,
-    pageLen: d.bodyLen,
-  };
+export const readJd = makeReadJd({
+  head: `document.querySelector('.job-detail-summary__title-text')||document.querySelector('h1')`,
+  scope: `document.querySelector('.job-detail-modules__detail')||document.querySelector('.job-detail-modules')||document.querySelector('.job-detail-summary')`,
+});
+
+/** 回到搜索页并重排「高薪」，保证卡片顺序与 cardIndex 一致 */
+async function backToSearch(cdp, kw) {
+  await navigate(cdp, searchUrl(kw || '.NET'), { settle: 3200 });
+  await sortBySalary(cdp);
+  await sleep(3000);
 }
 
 // ---------------------------------------------------------------- 卡片定位 + 投递
@@ -239,9 +225,7 @@ async function selectCard(cdp, item) {
 
 export async function applyOne(cdp, item) {
   // 回到该关键词的搜索页并重排序，保证 cardIndex 与列表顺序一致
-  await navigate(cdp, searchUrl(item.kw || '.NET'), { settle: 3200 });
-  await sortBySalary(cdp);
-  await sleep(3000);
+  await backToSearch(cdp, item.kw);
 
   const sel = await selectCard(cdp, item);
   if (!sel.ok) return { result: 'card_not_found' };
@@ -278,9 +262,7 @@ export async function applyOne(cdp, item) {
 }
 
 export async function probeItem(cdp, item) {
-  await navigate(cdp, searchUrl(item.kw || '.NET'), { settle: 3200 });
-  await sortBySalary(cdp);
-  await sleep(3000);
+  await backToSearch(cdp, item.kw);
   const sel = await selectCard(cdp, item);
   const ap = await evalJson(cdp, FIND_APPLY, 12000);
   return { title: item.title, panelTitle: sel.panelTitle || null, btn: ap ? `${ap.state}:${ap.t || ''}` : null };

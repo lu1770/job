@@ -9,7 +9,7 @@
  *   node src/cli.mjs apply --platform boss --retry-logs data/logs/boss-apply-xxx.json
  */
 import { session } from '../core/session.mjs';
-import { readJSON, latestDataFile, dataPath, createSink, writeJSONAtomic } from '../core/io.mjs';
+import { readJSON, latestDataFile, dataPath, createSink } from '../core/io.mjs';
 import { sleep } from '../core/cdp.mjs';
 import { paceOf } from '../platforms/index.mjs';
 
@@ -125,4 +125,3 @@ export async function probeAll(pid, items, opts = {}) {
 
 export const help = 'apply --platform <id> [--in list.json | --retry-logs logs.json] [--tab <id>]';
 export const verifyHelp = 'verify --platform <id> [--in list.json] [--probe]';
-export { writeJSONAtomic };

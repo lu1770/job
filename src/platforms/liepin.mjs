@@ -10,7 +10,11 @@
  *  - 读消息必须限定在「聊天窗容器」内（从输入框向上找），否则会读到左侧岗位卡文本。
  */
 import { evalJson, evalJs, sleep, clickAt, navigate } from '../core/cdp.mjs';
-import { techFlags, detectAgeLimit } from '../core/criteria.mjs';
+import { makeReadJd } from '../core/readjd.mjs';
+import { exprFindConv } from '../core/pagejs.mjs';
+
+/** 从详情 URL 提取岗位 id（scan / history 共用） */
+export const ID_RE = /liepin\.com\/(?:a|job)\/(\d+)/;
 
 export const id = 'liepin';
 export const label = '猎聘';
@@ -99,15 +103,7 @@ export function normalize(items) {
 
 // ---------------------------------------------------------------- JD
 
-export async function readJd(cdp) {
-  const d = await evalJson(cdp, `(function(){
-    const t=(document.body?document.body.innerText:'').replace(/\\n{2,}/g,'\\n');
-    const h=document.querySelector('h1');
-    return JSON.stringify({ title:h?h.innerText.trim():'', body:t.slice(0,5000) });
-  })()`, 20000);
-  if (!d) return null;
-  return { jdTitle: d.title, flags: techFlags(d.body), ageLimit: detectAgeLimit(d.body), body: d.body };
-}
+export const readJd = makeReadJd({ head: `document.querySelector('h1')` });
 
 // ---------------------------------------------------------------- 投递
 
@@ -163,15 +159,8 @@ const CONV_ITEMS = `(function(){
   })));
 })()`;
 
-const SCROLL_TO_CONV = (idx) => `(function(){
-  const items=[...document.querySelectorAll('.im-ui-contact-list-item')];
-  const el=items[${idx}]; if(!el) return 'null';
-  let p=el.parentElement;
-  while(p&&p!==document.body){ if(p.scrollHeight>p.clientHeight+5) break; p=p.parentElement; }
-  if(p&&p!==document.body){ const r=el.getBoundingClientRect(),cr=p.getBoundingClientRect(); p.scrollTop += (r.top-cr.top-100); }
-  const r=el.getBoundingClientRect();
-  return JSON.stringify({x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),w:Math.round(r.width)});
-})()`;
+/** 会话列表定位参数（虚拟化列表，索引会漂移，须按文本定位） */
+const CONV = { items: '.im-ui-contact-list-item', offset: 100 };
 
 /** 从输入框向上定位聊天窗容器，避免读到左侧岗位卡 */
 const CHAT_READ = `(function(){
@@ -222,22 +211,11 @@ export async function listConversations(cdp, seedItems = []) {
 export async function readConversation(cdp, target, { retries = 3 } = {}) {
   const idx = typeof target === 'object' ? target.i : target;
   const label = typeof target === 'object' ? String(target.txt || '').split(' | ')[0].trim() : '';
-  const byName = (label ? `(function(){
-    const items=[...document.querySelectorAll('.im-ui-contact-list-item')];
-    for(let i=0;i<items.length;i++){
-      if((items[i].innerText||'').indexOf(${JSON.stringify(label)})<0) continue;
-      let p=items[i].parentElement;
-      while(p&&p!==document.body){ if(p.scrollHeight>p.clientHeight+5) break; p=p.parentElement; }
-      if(p&&p!==document.body){ const r=items[i].getBoundingClientRect(),cr=p.getBoundingClientRect(); p.scrollTop += (r.top-cr.top-100); }
-      const r=items[i].getBoundingClientRect();
-      return JSON.stringify({x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),w:Math.round(r.width)});
-    }
-    return 'null';
-  })()` : null);
+  const byName = label ? exprFindConv({ ...CONV, text: label }) : null;
 
   for (let a = 0; a < retries; a++) {
     try {
-      const expr = (a === 0 && byName) ? byName : SCROLL_TO_CONV(idx);
+      const expr = (a === 0 && byName) ? byName : exprFindConv({ ...CONV, index: idx });
       const pos = await evalJson(cdp, expr, 12000);
       if (!pos || pos.w < 20) { await sleep(700); continue; }
       await clickAt(cdp, pos.x, pos.y);
@@ -251,22 +229,9 @@ export async function readConversation(cdp, target, { retries = 3 } = {}) {
 }
 
 export async function sendMessage(cdp, { key, text, retries = 3 }) {
-  const find = (k) => `(function(){
-    const items=[...document.querySelectorAll('.im-ui-contact-list-item')];
-    for(let i=0;i<items.length;i++){
-      const el=items[i]; if((el.innerText||'').indexOf(${JSON.stringify(k)})<0) continue;
-      let p=el.parentElement;
-      while(p&&p!==document.body){ if(p.scrollHeight>p.clientHeight+5) break; p=p.parentElement; }
-      if(p&&p!==document.body){ const r=el.getBoundingClientRect(),cr=p.getBoundingClientRect(); p.scrollTop += (r.top-cr.top-100); }
-      const r=el.getBoundingClientRect();
-      return JSON.stringify({i,x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),w:Math.round(r.width)});
-    }
-    return 'null';
-  })()`;
-
   let opened = false, conv = null;
   for (let a = 0; a < retries && !opened; a++) {
-    const pos = await evalJson(cdp, find(key), 12000);
+    const pos = await evalJson(cdp, exprFindConv({ ...CONV, text: key }), 12000);
     if (!pos) return { result: 'conv_not_found' };
     await clickAt(cdp, pos.x, pos.y);
     await sleep(2400);

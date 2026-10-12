@@ -10,7 +10,10 @@
  *  - PC 网页版**没有消息中心**，回消息只能由用户在 App/微信端操作。
  */
 import { evalJson, evalJs, sleep, clickAt, navigate, rand } from '../core/cdp.mjs';
-import { techFlags, detectAgeLimit } from '../core/criteria.mjs';
+import { makeReadJd } from '../core/readjd.mjs';
+
+/** 从详情 URL 提取岗位 id（scan / history 共用） */
+export const ID_RE = /51job\.com\/all\/(\d+)\.html/;
 
 export const id = 'job51';
 export const label = '前程无忧 51job';
@@ -94,15 +97,7 @@ export function normalize(items) {
   return items.map((j) => ({ ...j, url: detailUrl(j.jobId), id: j.jobId, loc: j.area }));
 }
 
-export async function readJd(cdp) {
-  const d = await evalJson(cdp, `(function(){
-    const t=(document.body?document.body.innerText:'').replace(/\\n{2,}/g,'\\n');
-    const h=document.querySelector('h1')||document.querySelector('.jobhead-title');
-    return JSON.stringify({ title:h?h.innerText.trim():'', body:t.slice(0,5000) });
-  })()`, 20000);
-  if (!d) return null;
-  return { jdTitle: d.title, flags: techFlags(d.body), ageLimit: detectAgeLimit(d.body), body: d.body };
-}
+export const readJd = makeReadJd({ head: `document.querySelector('h1')||document.querySelector('.jobhead-title')` });
 
 const BTN = `(function(){
   const b=document.querySelector('.apply-btn-new'); if(!b) return null;

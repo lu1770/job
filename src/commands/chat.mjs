@@ -14,6 +14,13 @@ import { session } from '../core/session.mjs';
 import { readJSON, latestDataFile, writeJSONAtomic, dataPath } from '../core/io.mjs';
 import { sleep } from '../core/cdp.mjs';
 
+/** 猎聘消息中心没有独立 URL，需要用种子职位页把 IM 抽屉拉起来 */
+function liepinSeed(opts, log) {
+  const seed = readJSON(opts.seed || latestDataFile('lists', 'liepin-targets'), []) || [];
+  if (!seed.length && log) log('⚠️ 未提供种子职位页，猎聘抽屉可能拉不起来');
+  return seed;
+}
+
 export async function chatRead(opts = {}) {
   const { platform: pid, log = console.log, unreadOnly = false, max = 30 } = opts;
   const { cdp, platform } = await session(pid, { tabId: opts.tabId });
@@ -23,12 +30,7 @@ export async function chatRead(opts = {}) {
     return { skipped: true };
   }
 
-  // 猎聘需要用职位页把 IM 抽屉拉起来
-  let seed = [];
-  if (typeof platform.listConversations === 'function' && platform.id === 'liepin') {
-    seed = readJSON(opts.seed || latestDataFile('lists', 'liepin-targets'), []) || [];
-    if (!seed.length) log('⚠️ 未提供种子职位页，猎聘抽屉可能拉不起来');
-  }
+  const seed = pid === 'liepin' ? liepinSeed(opts, log) : [];
 
   const opened = await platform.listConversations(cdp, seed);
   const list = Array.isArray(opened) ? opened : opened.list || [];
@@ -82,10 +84,7 @@ export async function chatSend(opts = {}) {
     return { skipped: true };
   }
 
-  let seed = [];
-  if (pid === 'liepin') seed = readJSON(opts.seed || latestDataFile('lists', 'liepin-targets'), []) || [];
-  if (typeof platform.openChat === 'function' && pid === 'liepin') await platform.openChat(cdp, seed);
-  else await platform.openChat(cdp);
+  await platform.openChat(cdp, pid === 'liepin' ? liepinSeed(opts, log) : undefined);
 
   const out = [];
   for (const r of replies) {
