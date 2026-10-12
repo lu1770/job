@@ -51,12 +51,24 @@ export async function jd(opts = {}) {
     i++;
     const rec = { ...j };
     try {
-      const url = platform.resolveUrl ? platform.resolveUrl(j) : (j.url || j.href);
-      await cdp.send('Page.navigate', { url });
-      await waitReady(cdp);
-      await sleep(900);
-      const d = await platform.readJd(cdp);
-      if (!d) { rec.err = 'read_failed'; }
+      // 无 URL 平台（如智联）由适配器自己「点卡片开面板」；其余走详情页导航
+      if (typeof platform.openJob === 'function') {
+        const opened = await platform.openJob(cdp, j);
+        if (opened && opened.ok === false) rec.err = opened.why || 'open_failed';
+        else if (opened && j.title && opened.panelTitle && opened.panelTitle !== j.title) {
+          rec.err = `panel_mismatch:${opened.panelTitle}`;
+        }
+      } else {
+        const url = platform.resolveUrl ? platform.resolveUrl(j) : (j.url || j.href);
+        if (!url) rec.err = 'no_url';
+        else {
+          await cdp.send('Page.navigate', { url });
+          await waitReady(cdp);
+          await sleep(900);
+        }
+      }
+      const d = rec.err ? null : await platform.readJd(cdp);
+      if (!d) { if (!rec.err) rec.err = 'read_failed'; }
       else {
         rec.jdTitle = d.jdTitle;
         rec.flags = d.flags;

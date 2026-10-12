@@ -29,8 +29,8 @@ function walk(node, visit) {
  * @param {string[]} o.dirs      扫描目录（通常是 data/* 与 legacy 回填目录）
  * @param {RegExp}  [o.include] 文件名白名单
  * @param {RegExp}  [o.exclude] 文件名黑名单
- * @param {RegExp}  o.idRe       从 href/url 中提取岗位 id
- * @param {RegExp}  o.hostRe     href 必须命中（限定本平台）
+ * @param {RegExp}  [o.idRe]     从 href/url 中提取岗位 id；传 null 表示该平台无 URL（仅靠 keyOf 去重）
+ * @param {RegExp}  [o.hostRe]   href 必须命中（限定本平台）
  * @param {Function} o.keyOf     从条目生成兜底去重键
  */
 export function buildHistory({
@@ -58,11 +58,14 @@ export function buildHistory({
       walk(doc, (j) => {
         // href 可能是相对路径（BOSS 采集产物），url 才是绝对地址 —— 两个都要看
         const href = `${j.href || ''} ${j.url || ''}`;
-        if (!hostRe.test(href)) return;
-        const m = href.match(idRe);
-        if (m) { ids.add(m[1]); n++; }
+        // 优先用条目自带的 id（智联这类无 URL 平台的 cardKey 也走这里）
+        if (typeof j.id === 'string' && j.id && !/^https?:/i.test(j.id)) { ids.add(j.id); n++; }
+        else if (idRe && hostRe.test(href)) {
+          const m = href.match(idRe);
+          if (m) { ids.add(m[1]); n++; }
+        }
         const k = keyOf(j);
-        if (k && k !== '||') keys.add(k);
+        if (k && k !== '||' && k !== '|') keys.add(k);
       });
       if (n) perFile[path.basename(dir) + '/' + name] = n;
     }
