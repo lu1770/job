@@ -13,6 +13,8 @@ import { sleep } from '../core/cdp.mjs';
 export async function scan(opts = {}) {
   const { platform: pid, keywords, out, capKMin = 25, log = console.log } = opts;
   const kws = parseList(keywords);
+  // 平台内多刷新次数（如 BOSS 推荐视图靠反复刷新换结果去重；1 = 关闭）
+  const refresh = opts.refresh ? Number(opts.refresh) : undefined;
   const { cdp, platform } = await session(pid, { tabId: opts.tabId });
 
   const file = out || dataPath('raw', `${pid}-scan`);
@@ -20,7 +22,7 @@ export async function scan(opts = {}) {
   const seen = new Set();
   let stopped = null;
 
-  log(`\n=== ${platform.label} 采集 | 关键词 ${kws.length} 个 ===`);
+  log(`\n=== ${platform.label} 采集 | 关键词 ${kws.length} 个${refresh ? ` | 每关键词刷新 ${refresh} 次` : ''} ===`);
   for (const kw of kws) {
     if (stopped) break;
     log(`--- ${kw} ---`);
@@ -28,22 +30,37 @@ export async function scan(opts = {}) {
     try {
       res = platform.VIEWPORT === 'wide' && platform.sortBySalary
         ? await scanWithSort(cdp, platform, kw)
-        : await platform.scanKeyword(cdp, kw);
+        : await platform.scanKeyword(cdp, kw, refresh ? { refresh } : {});
     } catch (e) {
       log(`  !! ${kw} 出错: ${e.message}（跳过该关键词）`);
       continue;
     }
     if (res.stopped) { stopped = res.stopped; log(`  !! 停止：${JSON.stringify(res.stopped)}`); break; }
-    if (res.diagnostic) log(`  !! 页面未发现职位卡片：${JSON.stringify(res.diagnostic)}`);
+    // diagnostic 有两种含义：页面没采到卡（真问题）/ 采集元信息（如 BOSS 的多刷新统计）。
+    // 只把前者当异常报出，后者正常打印。
+    if (res.diagnostic && res.diagnostic.reason) {
+      log(`  !! 页面未发现职位卡片：${JSON.stringify(res.diagnostic)}`);
+    }
 
     let items = platform.normalize ? platform.normalize(res.items) : res.items;
     let added = 0;
+    let dupInKeyword = 0;
+    const kwSeen = new Set();
     for (const j of items) {
       const id = jobId(platform, j);
-      if (!id || seen.has(id)) continue;
+      if (!id) continue;
+      if (kwSeen.has(id)) { dupInKeyword++; continue; }   // 平台内部去重（多刷新合并后仍可能有）
+      kwSeen.add(id);
+      if (seen.has(id)) continue;                          // 跨关键词去重
       seen.add(id);
       all.push({ ...j, id, kw, capK: capK(j.sal || j.salary), url: j.url || j.href });
       added++;
+    }
+    // 多刷新合并的元信息（如 BOSS「刷新 3 次，第2次新增 8…」）
+    const d = res.diagnostic;
+    if (d && d.stats) {
+      log(`  刷新 ${d.refreshes} 次：${d.stats.map((s) => `${s.got}(+${s.added})`).join(' → ')}`
+        + (dupInKeyword ? ` | 合并后重复 ${dupInKeyword}` : ''));
     }
     log(`  扫到 ${items.length}，新增 ${added}（累计 ${all.length}）`);
     writeJSONAtomic(file, all);   // 增量落盘：中途挂起也不丢
