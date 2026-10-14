@@ -35,6 +35,9 @@ export function searchUrl(keyword) {
 
 export const homeUrl = 'https://www.zhipin.com/web/geek/chat';
 
+/** 登录入口页（微信 / APP 扫码登录）。login 检测到未登录时会新开标签卡打开它。 */
+export const loginUrl = 'https://www.zhipin.com/web/user/?ka=header-login';
+
 /** 登录态只读核验 */
 export async function loginProbe(cdp) {
   const r = await evalJson(cdp, `(function(){

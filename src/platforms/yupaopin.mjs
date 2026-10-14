@@ -66,6 +66,9 @@ export function searchUrl(keyword) {
 
 export const homeUrl = `${SITE}/${CITY_CODE}/`;
 
+/** 登录入口页（APP / 微信扫码登录）。login 检测到未登录时会新开标签卡打开它。 */
+export const loginUrl = `${SITE}/web/login/`;
+
 // ---------------------------------------------------------------- 登录 / 风控
 
 /**

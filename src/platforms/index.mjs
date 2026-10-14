@@ -1,7 +1,8 @@
 /**
  * 平台注册表。新增平台只需在此挂载，实现下列接口即可被流水线复用：
- *   id, label, DEFAULT_KEYWORDS, searchUrl?(kw), scanKeyword(cdp,kw), normalize?(items),
+ *   id, label, DEFAULT_KEYWORDS, homeUrl?, loginUrl?, searchUrl?(kw), scanKeyword(cdp,kw), normalize?(items),
  *   readJd(cdp), applyOne(cdp,item), probeItem?(cdp,item), guard?(cdp), pace?, VIEWPORT?, chatSupported?
+ *   （loginUrl = 登录入口页；login 检测到未登录时新开标签卡打开它）
  */
 import * as boss from './boss.mjs';
 import * as liepin from './liepin.mjs';

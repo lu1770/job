@@ -37,6 +37,9 @@ export function searchUrl(keyword) {
 
 export const homeUrl = searchUrl('.NET');
 
+/** 登录入口页（扫码 / 短信 / 微信扫码快捷登录）。login 检测到未登录时会新开标签卡打开它。 */
+export const loginUrl = 'https://passport.zhaopin.com/login';
+
 export async function loginProbe(cdp) {
   await navigate(cdp, searchUrl('.NET'), { settle: 3200 });
   return evalJson(cdp, `(function(){

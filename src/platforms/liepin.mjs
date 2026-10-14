@@ -32,6 +32,9 @@ export function searchUrl(keyword) {
 
 export const homeUrl = 'https://www.liepin.com/zhaopin/';
 
+/** 登录入口页（扫码 / 微信登录）。login 检测到未登录时会新开标签卡打开它。 */
+export const loginUrl = 'https://www.liepin.com/user/login/';
+
 /** 登录态只读核验（顺带探测风控） */
 export async function loginProbe(cdp) {
   return evalJson(cdp, `(function(){

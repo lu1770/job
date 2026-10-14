@@ -28,6 +28,9 @@ export const pace = { min: 25, max: 45 }; // 秒，必须慢
 export function searchUrl(keyword) { return `https://we.51job.com/pc/search?jobArea=${JOB_AREA}&keyword=${encodeURIComponent(keyword)}&searchType=2`; }
 export function detailUrl(jobId) { return `https://jobs.51job.com/all/${jobId}.html`; }
 
+/** 登录入口页（扫码 / 微信登录）。login 检测到未登录时会新开标签卡打开它。 */
+export const loginUrl = 'https://login.51job.com/login.php';
+
 /**
  * 登录态核验：首页会弹「欢迎使用前程无忧 + 验证码」浮层，但登录态可能是正常的，
  * 别据此判为未登录 —— 以「我的职位」页的 Hi,用户名 为准。
