@@ -11,6 +11,7 @@
  */
 import { evalJson, evalJs, sleep, clickAt, navigate } from '../core/cdp.mjs';
 import { makeReadJd } from '../core/readjd.mjs';
+import { multiScan } from '../core/multiscan.mjs';
 import { exprFindConv, exprScrollBottom } from '../core/pagejs.mjs';
 
 /** 从详情 URL 提取岗位 id（scan / history 共用） */
@@ -124,33 +125,11 @@ async function scanOnce(cdp, keyword, { rounds = 25, settle = 2600 } = {}) {
  * 若某次刷新后池子没增长（推荐流返回完全相同的内容），提前结束，不空耗时间。
  */
 export async function scanKeyword(cdp, keyword, { rounds = 25, settle = 2600, refresh = 3 } = {}) {
-  const seen = new Map();          // id → 岗位条目（保留首次出现的字段）
-  let stopped = null;
-  let pass = 0;
-  let prevCount = 0;
-  const stats = [];
-
-  for (let r = 0; r < Math.max(1, refresh); r++) {
-    const res = await scanOnce(cdp, keyword, { rounds, settle });
-    if (res.stopped) { stopped = res.stopped; break; }
-
-    let added = 0;
-    for (const j of res.items) {
-      const id = idOf(j.href);
-      if (!id || seen.has(id)) continue;
-      seen.set(id, j);
-      added++;
-    }
-    pass++;
-    stats.push({ pass: r + 1, got: res.items.length, added });
-    prevCount = seen.size;
-
-    // 已经拿到就不再增长（推荐流这次没换内容），再刷也是同样结果
-    if (added === 0 && r > 0) break;
-    if (r < refresh - 1) await sleep(sleep + 1500);   // 多给一点间隔，别把请求打成突发
-  }
-
-  return { items: [...seen.values()], stopped, diagnostic: { refreshes: pass, stats, uniq: prevCount } };
+  return multiScan((r) => scanOnce(cdp, keyword, { rounds, settle }), {
+    refresh,
+    keyOf: (j) => idOf(j.href),
+    pauseMs: settle + 1500,   // 轮间真间隔，别把请求打成突发
+  });
 }
 
 /** BOSS 卡片 href 是站内相对路径，必须补成绝对地址，否则 Page.navigate 报 invalid URL */

@@ -64,7 +64,7 @@ const HELP = `
   --tab <id>            显式指定标签页（并行时必须）
   --keywords "a,b,c"    覆盖默认关键词
   --cap <K>             薪资上限阈值，默认 25
-  --refresh <N>         每关键词采集刷新次数（默认 BOSS=3，1=关闭）
+  --refresh <N>         每关键词采集刷新次数（全平台支持；默认 BOSS=3，其余=1，1=关闭）
   --in <file>           输入文件（scan/jd/targets/apply）
   --out <file>          输出文件
   --limit / --max N     数量上限

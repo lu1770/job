@@ -31,6 +31,7 @@
  */
 import { evalJson, evalJs, sleep, clickAt, navigate, rand } from '../core/cdp.mjs';
 import { withFlags } from '../core/readjd.mjs';
+import { multiScan } from '../core/multiscan.mjs';
 import { parseSalary } from '../core/salary.mjs';
 
 export const id = 'yupaopin';
@@ -181,8 +182,8 @@ const SCAN_CARDS = `(function(){
 
 const COUNT = `document.querySelectorAll('a[href*="/qiye/"]').length`;
 
-/** 单关键词：导航 → 滚动懒加载 → 扫卡片（鱼泡无翻页，池子靠滚动扩） */
-export async function scanKeyword(cdp, keyword, { rounds = 8, settle = 2600 } = {}) {
+/** 单轮：导航 → 滚动懒加载 → 扫卡片（鱼泡无翻页，池子靠滚动扩） */
+async function scanOnce(cdp, keyword, { rounds = 8, settle = 2600 } = {}) {
   await navigate(cdp, searchUrl(keyword), { settle: 4500 });
   const g = await guard(cdp);
   if (!g || g.slider || g.waf || g.loginPage) return { items: [], stopped: g || { reason: 'probe_failed' } };
@@ -199,10 +200,17 @@ export async function scanKeyword(cdp, keyword, { rounds = 8, settle = 2600 } = 
   }
 
   const items = (await evalJson(cdp, SCAN_CARDS, 25000)) || [];
-  if (!items.length) {
-    return { items: [], stopped: null, diagnostic: { reason: 'no_cards', head: await evalJs(cdp, '(document.body?document.body.innerText:"").replace(/\\s+/g," ").slice(0,200)') } };
-  }
-  return { items, stopped: null };
+  const diagnostic = items.length ? null : { reason: 'no_cards', head: await evalJs(cdp, '(document.body?document.body.innerText:"").replace(/\\s+/g," ").slice(0,200)') };
+  return { items, stopped: null, diagnostic };
+}
+
+/** 单关键词采集：刷新 N 次合并去重（默认 1 = 关闭；href 里 token 每次刷新都变，只有数字段稳定） */
+export async function scanKeyword(cdp, keyword, { rounds = 8, settle = 2600, refresh = 1 } = {}) {
+  return multiScan((r) => scanOnce(cdp, keyword, { rounds, settle }), {
+    refresh,
+    keyOf: (j) => jobIdOf(j.href) || j.href || '',
+    pauseMs: 3500,
+  });
 }
 
 /**

@@ -11,6 +11,7 @@
  */
 import { evalJson, evalJs, sleep, clickAt, navigate, rand } from '../core/cdp.mjs';
 import { makeReadJd } from '../core/readjd.mjs';
+import { multiScan } from '../core/multiscan.mjs';
 
 /** 从详情 URL 提取岗位 id（scan / history 共用） */
 export const ID_RE = /51job\.com\/all\/(\d+)\.html/;
@@ -75,6 +76,19 @@ export async function scanPage(cdp, keyword) {
   if (!g || g.slider || g.loginWall) return { items: [], stopped: g };
   const items = (await evalJson(cdp, SCAN_CARDS, 20000)) || [];
   return { items: items.filter((j) => j.jobId), stopped: null };
+}
+
+/** 单轮：先点「薪资优先」再扫（原 scan.mjs scanWithSort 特例收编进适配器） */
+async function scanOnce(cdp, keyword) {
+  await scanPage(cdp, keyword);
+  await sortBySalary(cdp);
+  await sleep(2600);
+  return scanPage(cdp, keyword);
+}
+
+/** 单关键词采集：刷新 N 次合并去重（默认 1 = 关闭） */
+export async function scanKeyword(cdp, keyword, { refresh = 1 } = {}) {
+  return multiScan(() => scanOnce(cdp, keyword), { refresh, keyOf: (j) => j.jobId, pauseMs: 3000 });
 }
 
 /** 点击「薪资优先」排序 */

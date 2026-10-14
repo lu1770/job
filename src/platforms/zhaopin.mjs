@@ -13,6 +13,7 @@
  */
 import { evalJson, evalJs, sleep, clickAt, navigate } from '../core/cdp.mjs';
 import { makeReadJd } from '../core/readjd.mjs';
+import { multiScan } from '../core/multiscan.mjs';
 import { fingerprint } from '../core/url.mjs';
 
 /** 智联卡片内没有职位详情 URL，id 靠 cardKey 指纹，不走 URL 正则 */
@@ -87,7 +88,8 @@ const SCAN_CARDS = `(function(){
   }));
 })()`;
 
-export async function scanKeyword(cdp, keyword) {
+/** 单轮：导航 → 排「高薪」→ 扫卡片 */
+async function scanOnce(cdp, keyword) {
   await navigate(cdp, searchUrl(keyword), { settle: 3400 });
   const g = await guard(cdp);
   if (!g || g.slider || g.loginWall) return { items: [], stopped: g };
@@ -95,6 +97,14 @@ export async function scanKeyword(cdp, keyword) {
   await sleep(3200);
   const items = (await evalJson(cdp, SCAN_CARDS, 20000)) || [];
   return { items: items.filter((j) => j.title), stopped: null };
+}
+
+/** 单关键词采集：刷新 N 次合并去重（默认 1 = 关闭；去重键 = 卡片指纹，与 normalize 一致） */
+export async function scanKeyword(cdp, keyword, { refresh = 1 } = {}) {
+  return multiScan(() => scanOnce(cdp, keyword), {
+    refresh,
+    keyOf: (j) => fingerprint({ title: j.title, company: j.company, salary: j.sal }),
+  });
 }
 
 /** 排序「高薪」—— 必须 JS click（真实鼠标会误触「低薪筛选」，URL 出现 sl=0000,4000） */

@@ -38,6 +38,7 @@ job/
 │  │  ├─ age.mjs         年龄限制探测器
 │  │  ├─ pagejs.mjs      页面内 JS 表达式生成器（会话定位 / 滚动，选择器由平台传入）
 │  │  ├─ readjd.mjs      JD 读取工厂（标题+正文 → techFlags/年龄判定，各平台共用）
+│  │  ├─ multiscan.mjs   多轮刷新采集合并（全平台 scanKeyword 共用，零新增即提前结束）
 │  │  └─ dedupe.mjs      跨轮次去重集合
 │  ├─ platforms/        平台适配器（唯一知道 DOM 选择器的地方）
 │  │  ├─ boss.mjs  liepin.mjs  job51.mjs  zhaopin.mjs  yupaopin.mjs  index.mjs

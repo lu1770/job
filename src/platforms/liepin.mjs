@@ -11,6 +11,7 @@
  */
 import { evalJson, evalJs, sleep, clickAt, navigate } from '../core/cdp.mjs';
 import { makeReadJd } from '../core/readjd.mjs';
+import { multiScan } from '../core/multiscan.mjs';
 import { exprFindConv } from '../core/pagejs.mjs';
 
 /** 从详情 URL 提取岗位 id（scan / history 共用） */
@@ -79,7 +80,8 @@ const SCAN_CARDS = `(function(){
   }));
 })()`;
 
-export async function scanKeyword(cdp, keyword, { rounds = 15, settle = 2400 } = {}) {
+/** 单轮：导航 → 滚动懒加载 → 扫卡片 */
+async function scanOnce(cdp, keyword, { rounds = 15, settle = 2400 } = {}) {
   await navigate(cdp, searchUrl(keyword), { settle: 3000 });
   const g = await guard(cdp);
   if (!g || g.slider || g.risk || g.loginWall) return { items: [], stopped: g || { reason: 'probe_failed' } };
@@ -94,6 +96,17 @@ export async function scanKeyword(cdp, keyword, { rounds = 15, settle = 2400 } =
   }
   const items = (await evalJson(cdp, SCAN_CARDS, 20000)) || [];
   return { items: items.filter((j) => j.href), stopped: null };
+}
+
+/** 单关键词采集：刷新 N 次合并去重（默认 1 = 关闭，搜索结果集较稳定） */
+export async function scanKeyword(cdp, keyword, { rounds = 15, settle = 2400, refresh = 1 } = {}) {
+  return multiScan((r) => scanOnce(cdp, keyword, { rounds, settle }), {
+    refresh,
+    keyOf: (j) => {
+      const m = String(j.href || '').match(ID_RE);
+      return m ? m[1] : j.href;
+    },
+  });
 }
 
 /** 只保留苏州（或城市字段为空但整体文本含苏州） */

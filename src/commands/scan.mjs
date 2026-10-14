@@ -28,9 +28,7 @@ export async function scan(opts = {}) {
     log(`--- ${kw} ---`);
     let res;
     try {
-      res = platform.VIEWPORT === 'wide' && platform.sortBySalary
-        ? await scanWithSort(cdp, platform, kw)
-        : await platform.scanKeyword(cdp, kw, refresh ? { refresh } : {});
+      res = await platform.scanKeyword(cdp, kw, refresh ? { refresh } : {});
     } catch (e) {
       log(`  !! ${kw} 出错: ${e.message}（跳过该关键词）`);
       continue;
@@ -73,14 +71,6 @@ export async function scan(opts = {}) {
   if (stopped) log(`⚠️ 未跑完：${JSON.stringify(stopped)}`);
   cdp.close();
   return { file, total: all.length, hit: hit.length, stopped, items: all };
-}
-
-/** 51job：先点「薪资优先」再扫 */
-async function scanWithSort(cdp, platform, kw) {
-  await platform.scanPage(cdp, kw);
-  await platform.sortBySalary(cdp);
-  await sleep(2600);
-  return platform.scanPage(cdp, kw);
 }
 
 /** 岗位 id：条目自带 id 优先，其次按平台 ID_RE 从 URL 提取（与 history 同一份正则） */
