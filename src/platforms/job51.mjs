@@ -16,10 +16,6 @@ import { multiScan } from '../core/multiscan.mjs';
 /** 从详情 URL 提取岗位 id（scan / history 共用） */
 export const ID_RE = /51job\.com\/all\/(\d+)\.html/;
 
-/** 标签页归属特征：session() 靠它认领「本平台自己的」标签（见 core/session.mjs）。
- *  用裸 '51job.com' 以同时覆盖搜索域 we.51job.com 与详情域 jobs.51job.com */
-export const HOST = '51job.com';
-
 export const id = 'job51';
 export const label = '前程无忧 51job';
 
@@ -34,6 +30,9 @@ export function detailUrl(jobId) { return `https://jobs.51job.com/all/${jobId}.h
 
 /** 登录入口页（扫码 / 微信登录）。login 检测到未登录时会新开标签卡打开它。 */
 export const loginUrl = 'https://login.51job.com/login.php';
+
+/** 首页：daily 为平台开专用标签时的起始页（与其他平台的 homeUrl 同语义） */
+export const homeUrl = 'https://we.51job.com/pc/my/myjob';
 
 /**
  * 登录态核验：首页会弹「欢迎使用前程无忧 + 验证码」浮层，但登录态可能是正常的，

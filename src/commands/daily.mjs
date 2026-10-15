@@ -12,7 +12,8 @@ import { jd } from './jd.mjs';
 import { targets } from './targets.mjs';
 import { apply, verify } from './apply.mjs';
 import { chatRead } from './chat.mjs';
-import { PRIORITY, parseList } from '../platforms/index.mjs';
+import { PRIORITY, parseList, getPlatform } from '../platforms/index.mjs';
+import { openTab, sleep } from '../core/cdp.mjs';
 import { writeJSONAtomic, DATA } from '../core/io.mjs';
 import path from 'node:path';
 
@@ -29,8 +30,17 @@ export async function daily(opts = {}) {
   }
 
   for (const pid of pids) {
-    const P = { platform: pid };
     log(`\n########## ${pid} ##########`);
+    // 本平台专用标签：采集→核验→投递→复核→巡检全部在这同一张标签上执行，
+    // 与其他平台/其他并发运行物理隔离，杜绝共享浏览器串台。
+    // （用户显式传 --tab 时尊重之，不另开。）
+    const P = { platform: pid };
+    if (opts.tabId) P.tabId = opts.tabId;
+    else {
+      const tab = await openTab(getPlatform(pid).homeUrl || 'about:blank');
+      await sleep(2000);
+      P.tabId = tab.id;
+    }
     try {
       if (!skipLogin && summary.env?.platforms?.[pid]?.ok === false) {
         log(`跳过 ${pid}：未登录`);

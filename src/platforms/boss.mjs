@@ -17,10 +17,6 @@ import { exprFindConv, exprScrollBottom } from '../core/pagejs.mjs';
 /** 从详情 URL 提取岗位 id（scan / history 共用） */
 export const ID_RE = /job_detail\/([^.]+)\.html/;
 
-/** 标签页归属特征：session() 靠它在共享浏览器里认领「本平台自己的」标签，
- *  避免并发运行抢到同一个标签互相覆盖导航（详见 core/session.mjs） */
-export const HOST = 'zhipin.com';
-
 export const id = 'boss';
 export const label = 'BOSS 直聘';
 

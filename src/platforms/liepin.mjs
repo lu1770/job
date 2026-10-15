@@ -17,9 +17,6 @@ import { exprFindConv } from '../core/pagejs.mjs';
 /** 从详情 URL 提取岗位 id（scan / history 共用） */
 export const ID_RE = /liepin\.com\/(?:a|job)\/(\d+)/;
 
-/** 标签页归属特征：session() 靠它认领「本平台自己的」标签（见 core/session.mjs） */
-export const HOST = 'liepin.com';
-
 export const id = 'liepin';
 export const label = '猎聘';
 
