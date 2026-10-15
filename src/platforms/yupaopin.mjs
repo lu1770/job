@@ -60,6 +60,9 @@ export const pace = { min: 15, max: 30 }; // 有 WAF + 访问量未知，宁慢�
  */
 export const ID_RE = /(?:yupao\.com)?\/zhaogong\/(\d+)/;
 
+/** 标签页归属特征：session() 靠它认领「本平台自己的」标签（见 core/session.mjs） */
+export const HOST = 'yupao.com';
+
 export function searchUrl(keyword) {
   return `${SITE}/topic/${CITY_CODE}${CAT_ALL}/?keywords=${encodeURIComponent(keyword)}`;
 }

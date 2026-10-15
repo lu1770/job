@@ -19,6 +19,9 @@ import { fingerprint } from '../core/url.mjs';
 /** 智联卡片内没有职位详情 URL，id 靠 cardKey 指纹，不走 URL 正则 */
 export const ID_RE = null;
 
+/** 标签页归属特征：session() 靠它认领「本平台自己的」标签（见 core/session.mjs） */
+export const HOST = 'zhaopin.com';
+
 export const id = 'zhaopin';
 export const label = '智联招聘';
 

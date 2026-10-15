@@ -16,6 +16,10 @@ import { multiScan } from '../core/multiscan.mjs';
 /** 从详情 URL 提取岗位 id（scan / history 共用） */
 export const ID_RE = /51job\.com\/all\/(\d+)\.html/;
 
+/** 标签页归属特征：session() 靠它认领「本平台自己的」标签（见 core/session.mjs）。
+ *  用裸 '51job.com' 以同时覆盖搜索域 we.51job.com 与详情域 jobs.51job.com */
+export const HOST = '51job.com';
+
 export const id = 'job51';
 export const label = '前程无忧 51job';
 
