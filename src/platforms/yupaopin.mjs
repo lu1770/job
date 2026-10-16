@@ -360,7 +360,7 @@ export async function readJd(cdp) {
       let p=n.parentElement;
       for(let i=0;i<5&&p;i++,p=p.parentElement){
         const len=(p.innerText||'').length;
-        if(len>100&&len<6000){ scope=p; break; }
+        if(len>100&&len<30000){ scope=p; break; }
       }
       if(scope) break;
     }
@@ -369,7 +369,7 @@ export async function readJd(cdp) {
     const h1=document.querySelector('h1');
     return JSON.stringify({
       title:h1?(h1.innerText||'').trim():'',
-      body:t.slice(0,6000),
+      body:t.slice(0,30000),
       scoped: scope!==document.body,
       bodyLen: document.body?document.body.innerText.length:0
     });

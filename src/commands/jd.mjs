@@ -71,6 +71,7 @@ export async function jd(opts = {}) {
         rec.jdTitle = d.jdTitle;
         rec.flags = d.flags;
         rec.ageLimit = d.ageLimit || null;
+        rec.jd = d.body || '';   // JD 全文落盘：打开详情页时已读到，完整记录供后续分析/训练用
         rec.excerpt = (d.body || '').replace(/\s+/g, ' ').slice(0, 220);
       }
       const g = platform.guard ? await platform.guard(cdp) : null;

@@ -2,6 +2,9 @@
  * JD 读取工厂：各平台 readJd 的尾部逻辑完全一致
  * （读正文 → techFlags → detectAgeLimit），差异只有标题/正文的取法。
  *
+ * body 上限 30000 字符：JD 全文会随核验记录完整落盘（见 commands/jd.mjs 的 rec.jd），
+ * 这个上限只是 CDP 单次返回的防爆保护，正常 JD（一般 2-5KB）远不会触顶。
+ *
  * @param {object} o
  * @param {string} o.head    页面内表达式：标题元素（如 "document.querySelector('h1')"）
  * @param {string} [o.scope] 页面内表达式：正文作用域元素（智联必须限定右侧详情面板，
@@ -26,7 +29,7 @@ export function makeReadJd({ head, scope = null }) {
       ${scope ? `const panel=${scope}; const el=panel||document.body;` : 'const el=document.body;'}
       if(!el) return null;
       const t=(el.innerText||'').replace(/\\n{2,}/g,'\\n');
-      return JSON.stringify({ title:h?(h.innerText||'').trim():'', body:t.slice(0,5000)${scope
+      return JSON.stringify({ title:h?(h.innerText||'').trim():'', body:t.slice(0,30000)${scope
         ? ', scoped:!!panel, bodyLen:(document.body?document.body.innerText.length:0)'
         : ''} });
     })()`, 20000);

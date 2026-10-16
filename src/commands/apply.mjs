@@ -26,6 +26,7 @@ export async function apply(opts = {}) {
     //   - 业务性终态（不重投）：already(已投) / closed(已招满) / chat_only(不收简历) / not_found(token失效，重投仍失效)
     //   - 需人工介入（不重投）：login_wall
     // ⚠️ waf_blocked 必须在内：风控会自行过期，漏了会让这批岗位永远不再重试。
+    const prev = readJSON(opts.retryLogs, []) || [];
     const bad = new Set(['unknown', 'quota_blocked', 'js_fail', 'no_btn', 'out_of_viewport', 'slider_blocked', 'waf_blocked', 'risk_blocked', 'error']);
     items = prev.filter((r) => bad.has(r.result));
     mode = 'retry';

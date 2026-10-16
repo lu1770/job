@@ -130,6 +130,12 @@ const BTN = `(function(){
 
 export async function applyOne(cdp, item) {
   await navigate(cdp, item.url || detailUrl(item.jobId), { settle: 1600 });
+
+  // 风控/拦页优先判：滑块或登录墙时按钮根本不在 DOM，直接报对应结果，不再报 no_btn。
+  const g0 = await guard(cdp);
+  if (g0 && g0.slider) return { result: 'slider_blocked', guard: g0 };
+  if (g0 && g0.loginWall) return { result: 'login_wall', guard: g0 };
+
   const before = await evalJson(cdp, BTN);
   if (!before) return { result: 'no_btn' };
   if (before.disabled) return { result: 'already' };
@@ -139,10 +145,32 @@ export async function applyOne(cdp, item) {
   await sleep(rand(1500, 2600));
   const url = await evalJs(cdp, 'location.href');
   if (/applysuccess\.php/.test(url)) return { result: 'ok' };
+
+  // 51job 部分岗位点击后弹「确认投递」对话框，需再点一次确认按钮才真正投递。
+  const confirmBtn = await evalJs(cdp, `(function(){
+    const el=[...document.querySelectorAll('button, a, span, div')].find(e=>{
+      const t=(e.innerText||'').trim();
+      return /^(确定|确认投递|确认|是的|提交)$/.test(t) && e.offsetParent;
+    });
+    if(!el) return null;
+    const r=el.getBoundingClientRect();
+    return JSON.stringify({text:(el.innerText||'').trim(), x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2)});
+  })()`);
+  if (confirmBtn) {
+    const cb = JSON.parse(confirmBtn);
+    await clickAt(cdp, cb.x, cb.y);
+    await sleep(rand(1500, 2200));
+    const url2 = await evalJs(cdp, 'location.href');
+    if (/applysuccess\.php/.test(url2)) return { result: 'ok' };
+    const after2 = await evalJson(cdp, BTN);
+    if (after2 && after2.disabled) return { result: 'ok' };
+  }
+
   const after = await evalJson(cdp, BTN);
   if (after && after.disabled) return { result: 'ok' };
   const g = await guard(cdp);
-  if (g && g.slider) return { result: 'slider_blocked' };
+  if (g && g.slider) return { result: 'slider_blocked', guard: g };
+  if (g && g.loginWall) return { result: 'login_wall', guard: g };
   return { result: 'unknown' };
 }
 
