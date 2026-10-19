@@ -52,6 +52,15 @@ export async function jd(opts = {}) {
   for (const j of cand) {
     i++;
     const rec = { ...j };
+    let navUrl = null;
+    // JD 全文落盘（readJd 返回 withFlags 结构，含 flags/ageLimit/body）
+    const put = (d) => {
+      rec.jdTitle = d.jdTitle;
+      rec.flags = d.flags;
+      rec.ageLimit = d.ageLimit || null;
+      rec.jd = d.body || '';
+      rec.excerpt = (d.body || '').replace(/\s+/g, ' ').slice(0, 220);
+    };
     try {
       // 无 URL 平台（如智联）由适配器自己「点卡片开面板」；其余走详情页导航
       if (typeof platform.openJob === 'function') {
@@ -61,20 +70,22 @@ export async function jd(opts = {}) {
           rec.err = `panel_mismatch:${opened.panelTitle}`;
         }
       } else {
-        const url = platform.resolveUrl ? platform.resolveUrl(j) : (j.url || j.href);
-        if (!url) rec.err = 'no_url';
-        else await navigate(cdp, url, { settle: 900 });
+        navUrl = platform.resolveUrl ? platform.resolveUrl(j) : (j.url || j.href);
+        if (!navUrl) rec.err = 'no_url';
+        else await navigate(cdp, navUrl, { settle: 900 });
       }
       const d = rec.err ? null : await platform.readJd(cdp);
-      if (!d) { if (!rec.err) rec.err = 'read_failed'; }
-      else {
-        rec.jdTitle = d.jdTitle;
-        rec.flags = d.flags;
-        rec.ageLimit = d.ageLimit || null;
-        rec.jd = d.body || '';   // JD 全文落盘：打开详情页时已读到，完整记录供后续分析/训练用
-        rec.excerpt = (d.body || '').replace(/\s+/g, ' ').slice(0, 220);
+      if (d) put(d); else if (!rec.err) rec.err = 'read_failed';
+      let g = platform.guard ? await platform.guard(cdp) : null;
+      // 平台滑块自愈（如 job51）：等 sliderWaitMs 后刷新重读本岗，而不是停整批
+      if (g && g.slider && platform.sliderWaitMs && navUrl) {
+        log(`[${i}/${cand.length}] ${(j.title || '').slice(0, 28)} -> ⏳ 滑块，等 ${platform.sliderWaitMs / 60000} 分钟后刷新重试`);
+        await sleep(platform.sliderWaitMs);
+        await navigate(cdp, navUrl, { settle: 1600 });
+        const d2 = await platform.readJd(cdp);
+        if (d2 && d2.jdTitle) { put(d2); rec.err = null; }
+        g = await platform.guard(cdp);
       }
-      const g = platform.guard ? await platform.guard(cdp) : null;
       if (g && (g.slider || g.risk || g.loginWall)) {
         rec.stopped = g;
         sink.push(rec);

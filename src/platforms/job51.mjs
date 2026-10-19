@@ -65,6 +65,23 @@ export async function guard(cdp) {
   })()`, 15000);
 }
 
+/**
+ * 滑块策略（用户口径）：检测到滑块 → 等 15 分钟 → 刷新页面 → 复查。
+ * 供 jd.mjs 识别平台能力的开关；scan/apply 内部直接使用 sliderRecover。
+ */
+export const sliderWaitMs = 15 * 60 * 1000;
+
+/** 等滑块过期并刷新页面。返回 true=已恢复可继续；false=等待后仍被拦。 */
+export async function sliderRecover(cdp, url) {
+  console.log(`    ⏳ 检测到滑块，等待 ${sliderWaitMs / 60000} 分钟后刷新页面重试…`);
+  await sleep(sliderWaitMs);
+  await navigate(cdp, url, { settle: 2600 });
+  const g = await guard(cdp);
+  if (g && g.slider) { console.log('    ⛔ 刷新后仍在滑块页'); return false; }
+  console.log('    ✅ 滑块已解除，继续');
+  return true;
+}
+
 const SCAN_CARDS = `(function(){
   return JSON.stringify([...document.querySelectorAll('.joblist-item')].map((it,i)=>{
     const raw=it.querySelector('[sensorsname]');
@@ -79,7 +96,12 @@ const SCAN_CARDS = `(function(){
 export async function scanPage(cdp, keyword) {
   await navigate(cdp, searchUrl(keyword), { settle: 3000 });
   const g = await guard(cdp);
-  if (!g || g.slider || g.loginWall) return { items: [], stopped: g };
+  if (g && g.slider) {
+    // 滑块：等 15 分钟刷新后重扫一次；仍被拦才报停止
+    if (!(await sliderRecover(cdp, searchUrl(keyword)))) return { items: [], stopped: g };
+    return scanPage(cdp, keyword);
+  }
+  if (!g || g.loginWall) return { items: [], stopped: g };
   const items = (await evalJson(cdp, SCAN_CARDS, 20000)) || [];
   return { items: items.filter((j) => j.jobId), stopped: null };
 }
@@ -129,11 +151,16 @@ const BTN = `(function(){
 })()`;
 
 export async function applyOne(cdp, item) {
-  await navigate(cdp, item.url || detailUrl(item.jobId), { settle: 1600 });
+  const url = item.url || detailUrl(item.jobId);
+  await navigate(cdp, url, { settle: 1600 });
 
   // 风控/拦页优先判：滑块或登录墙时按钮根本不在 DOM，直接报对应结果，不再报 no_btn。
-  const g0 = await guard(cdp);
-  if (g0 && g0.slider) return { result: 'slider_blocked', guard: g0 };
+  // 滑块按用户口径等 15 分钟刷新重试，恢复后继续本岗位投递。
+  let g0 = await guard(cdp);
+  if (g0 && g0.slider) {
+    if (!(await sliderRecover(cdp, url))) return { result: 'slider_blocked', guard: g0 };
+    g0 = await guard(cdp);
+  }
   if (g0 && g0.loginWall) return { result: 'login_wall', guard: g0 };
 
   const before = await evalJson(cdp, BTN);
@@ -143,8 +170,8 @@ export async function applyOne(cdp, item) {
 
   await clickAt(cdp, before.x, before.y);
   await sleep(rand(1500, 2600));
-  const url = await evalJs(cdp, 'location.href');
-  if (/applysuccess\.php/.test(url)) return { result: 'ok' };
+  const curUrl = await evalJs(cdp, 'location.href');
+  if (/applysuccess\.php/.test(curUrl)) return { result: 'ok' };
 
   // 51job 部分岗位点击后弹「确认投递」对话框，需再点一次确认按钮才真正投递。
   const confirmBtn = await evalJs(cdp, `(function(){
