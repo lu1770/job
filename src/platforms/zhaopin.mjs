@@ -8,7 +8,9 @@
  * 因此本适配器：
  *  - normalize() 不产出 url，改为产出 `cardIndex`（卡片序号）+ `cardKey`（标题|薪资|公司 指纹）；
  *  - applyOne() 回到搜索页 → 按 cardIndex 真实鼠标点卡片 → 用面板标题 `.job-detail-summary__title-text`
- *    校验确实切到了目标岗位 → 再在面板里 JS click「立即投递」；
+ *    校验确实切到了目标岗位 → 再真实鼠标点击「立即投递」（实测按钮 JS click 无效）；
+ *    境外接收方岗位会弹《境外接收方基本情况》同意书，需再点「同意并投递」；
+ *  - 卡片找不到时以投递记录页（i.zhaopin.com/schedule）为权威复核；
  *  - 去重靠 cardKey（跨轮次稳定），不靠 URL。
  */
 import { evalJson, evalJs, sleep, clickAt, navigate } from '../core/cdp.mjs';
@@ -194,14 +196,23 @@ const FIND_APPLY = `(function(){
   if(stay) return JSON.stringify({state:'stay'});
   const els=[...document.querySelectorAll('button,a,div,span')].filter(e=>{
     const t=(e.textContent||'').trim(); const r=e.getBoundingClientRect();
-    return r.width>80&&r.height>25&&r.width<300&&/^(立即投递|已投递|投递简历|已申请|继续沟通)$/.test(t)&&vis(e);
+    return r.width>60&&r.height>24&&r.width<320&&/^(立即投递|投递简历|已投递|投递成功|已申请|继续沟通|同意并投递)$/.test(t)&&vis(e);
   });
   if(!els.length) return null;
-  const done=els.find(e=>/已投递|已申请|继续沟通/.test(e.textContent));
+  // 注意：未投岗位面板会同时出现「立即投递」+「继续沟通」，继续沟通是聊天按钮不是已投标志
+  const done=els.find(e=>/已投递|投递成功|已申请/.test(e.textContent));
   if(done) return JSON.stringify({state:'done', t:done.textContent.trim()});
-  const b=els[0]; const r=b.getBoundingClientRect();
-  return JSON.stringify({state:'ready', t:b.textContent.trim(), x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2)});
-})()`;
+  const consent=els.find(e=>/同意并投递/.test(e.textContent));
+  if(consent) { const r=consent.getBoundingClientRect();
+    return JSON.stringify({state:'consent', t:consent.textContent.trim(), x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2)}); }
+  const ab=els.find(e=>/立即投递|投递简历/.test(e.textContent));
+  if(ab) { ab.scrollIntoView({block:'center'});
+    const r=ab.getBoundingClientRect();
+    return JSON.stringify({state:'ready', t:ab.textContent.trim(), x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2)}); }
+  const chat=els.find(e=>/继续沟通/.test(e.textContent));
+  if(chat) return JSON.stringify({state:'chat', t:chat.textContent.trim()});
+  return null;
+})();`
 
 /** 轮询等待右侧面板标题切换到目标（面板渲染比点击慢，实测需要 3-6s） */
 async function waitPanel(cdp, title, { tries = 8, gap = 800 } = {}) {
@@ -241,7 +252,13 @@ export async function applyOne(cdp, item) {
   await backToSearch(cdp, item.kw);
 
   const sel = await selectCard(cdp, item);
-  if (!sel.ok) return { result: 'card_not_found' };
+  if (!sel.ok) {
+    // 搜索列表易变（岗位下线/已投后消失），以「投递记录」页为权威复核：
+    // 记录里有 → 已投过；没有 → 卡片确实找不到了。
+    const delivered = await verifyDelivered(cdp, item);
+    if (delivered) return { result: 'already', via: 'records' };
+    return { result: 'card_not_found' };
+  }
   // 面板标题必须等于目标岗位，否则说明列表顺序漂移了，绝不盲投
   if (item.title && sel.panelTitle && sel.panelTitle !== item.title) {
     return { result: 'panel_mismatch', panelTitle: sel.panelTitle, expect: item.title };
@@ -256,22 +273,37 @@ export async function applyOne(cdp, item) {
   }
   if (!ap) return { result: 'no_btn' };
   if (ap.state === 'done') return { result: 'already' };
+  if (ap.state === 'chat') return { result: 'chat_only', t: ap.t };
 
-  const clicked = await evalJs(cdp, `(function(){
-    const els=[...document.querySelectorAll('button,a,div,span')].filter(e=>{
-      const t=(e.textContent||'').trim(); const r=e.getBoundingClientRect();
-      return r.width>80&&r.height>25&&r.width<300&&/^立即投递$/.test(t)&&r.width>10&&r.height>10;
-    });
-    if(!els.length) return 'nf'; els[0].click(); return 'ok';
-  })()`, 12000);
-  if (clicked !== 'ok') return { result: 'js_fail' };
-  await sleep(2400);
+  // 实测：投递按钮 JS click 无效（状态不变），必须真实鼠标点击（与卡片点击同理）。
+  // 境外接收方岗位点击「立即投递」后会弹《境外接收方基本情况》同意书，需再真实点击「同意并投递」。
+  const wasConsent = ap.state === 'consent';
+  await clickAt(cdp, ap.x, ap.y);
 
-  const ap2 = await evalJson(cdp, FIND_APPLY, 12000);
-  if (ap2 && ap2.state === 'done') return { result: 'ok' };
+  const w = await waitApplyDone(cdp);
+  if (w.done) return { result: 'ok' };
+  if (w.consent && !wasConsent) {
+    await clickAt(cdp, w.consent.x, w.consent.y);
+    const w2 = await waitApplyDone(cdp);
+    if (w2.done) return { result: 'ok', via: 'consent' };
+  }
+
   const g = await guard(cdp);
   if (g && g.slider) return { result: 'slider_blocked' };
   return { result: 'unknown' };
+}
+
+/** 点击后轮询投递结果：done=已投；consent=弹出同意书待确认；ready=状态未变（点击未生效） */
+async function waitApplyDone(cdp, { tries = 4, gap = 1400 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    await sleep(i === 0 ? 1200 : gap);
+    const ap = await evalJson(cdp, FIND_APPLY, 12000);
+    if (!ap) continue;
+    if (ap.state === 'done') return { done: true, t: ap.t };
+    if (ap.state === 'consent') return { done: false, consent: ap };
+    if (ap.state === 'ready') return { done: false, ready: true };
+  }
+  return { done: false };
 }
 
 export async function probeItem(cdp, item) {
@@ -283,21 +315,22 @@ export async function probeItem(cdp, item) {
 
 // ---------------------------------------------------------------- 记录核验
 
-/** 权威核验：投递记录页「投递成功」页签 */
-export async function verifyRecords(cdp) {
-  await navigate(cdp, 'https://i.zhaopin.com/schedule', { settle: 3000 });
-  return evalJson(cdp, `(function(){
-    const tabs=[...document.querySelectorAll('a,span,div')].filter(e=>/投递成功/.test((e.innerText||'').trim()));
-    if(tabs.length) tabs[0].click();
-    return JSON.stringify({ok: tabs.length>0});
-  })()`, 12000);
-}
-
-export async function readRecords(cdp, limit = 60) {
-  return evalJson(cdp, `(function(){
-    const rows=[...document.querySelectorAll('[class*=record], [class*=item], tr')].slice(0,${limit});
-    return JSON.stringify(rows.map(r=>(r.innerText||'').replace(/\\s+/g,' ').trim().slice(0,160)).filter(Boolean));
-  })()`, 20000);
+/**
+ * 权威复核：投递记录页（i.zhaopin.com/schedule「投递成功」页签）按 标题+公司 匹配。
+ * 搜索列表易变，卡片定位法会失效；此页是投递事实的唯一权威来源。
+ */
+export async function verifyDelivered(cdp, item) {
+  await navigate(cdp, 'https://i.zhaopin.com/schedule', { settle: 3200 });
+  const hit = await evalJson(cdp, `(function(){
+    const t=${JSON.stringify(item.title || '')};
+    const c=${JSON.stringify(item.company || '')};
+    const rows=[...document.querySelectorAll('div,li,tr')].filter(e=>{
+      const s=(e.innerText||'');
+      return /成功投递/.test(s) && s.length<200 && (!t || s.includes(t)) && (!c || s.includes(c));
+    });
+    return JSON.stringify(rows.length>0);
+  })()`, 15000);
+  return hit === true;
 }
 
 export const chatSupported = false;
