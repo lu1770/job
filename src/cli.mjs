@@ -22,6 +22,7 @@ import { targets } from './commands/targets.mjs';
 import { apply, verify } from './commands/apply.mjs';
 import { chatRead, chatSend } from './commands/chat.mjs';
 import { daily } from './commands/daily.mjs';
+import { keywords } from './commands/keywords.mjs';
 import { rebuildHistory } from './commands/history.mjs';
 import { PLATFORMS, PRIORITY } from './platforms/index.mjs';
 
@@ -48,7 +49,8 @@ const HELP = `
 
 命令
   login                 环境与登录态核验（只读）
-  daily                 每日全流程：登录→采集→JD→清单→投递→复核→会话巡检
+  daily                 每日全流程：登录→采集→JD→清单→投递→复核→会话巡检→关键词排行
+  keywords              当日 JD 关键词排行（只读分析，daily 末尾自动执行）
   scan                  多关键词采集岗位
   jd                    逐岗实读 JD，判定技术栈与年龄限制
   targets               生成最终投递清单
@@ -67,6 +69,9 @@ const HELP = `
   --refresh <N>         每关键词采集刷新次数（全平台支持；默认 BOSS=3，其余=1，1=关闭）
   --in <file>           输入文件（scan/jd/targets/apply）
   --out <file>          输出文件
+  --date <YYYYMMDD>     keywords 统计日期，默认今天
+  --top <N>             keywords 关键词条数，默认 30
+  --json-out <file>     keywords 明细 JSON 路径
   --limit / --max N     数量上限
   --no-dedupe           跳过历史去重
   --dry                 只打印不执行（未实现的命令会提示）
@@ -99,6 +104,9 @@ async function main() {
     show: a.show === undefined ? undefined : bool(a.show),
     skipChat: bool(a['skip-chat']),
     skipLogin: bool(a['skip-login']),
+    date: a.date,
+    top: a.top ? Number(a.top) : undefined,
+    jsonOut: a['json-out'],
   };
 
   try {
@@ -116,6 +124,7 @@ async function main() {
       }
       case 'history': return void (await rebuildHistory(base));
       case 'daily': return void (await daily(base));
+      case 'keywords': return void (await keywords(base));
       case 'platforms': {
         for (const [id, p] of Object.entries(PLATFORMS)) {
           console.log(`${id.padEnd(9)} ${p.label.padEnd(12)} 关键词 ${(p.DEFAULT_KEYWORDS || []).length} 个 | 视口 ${p.VIEWPORT || 'normal'} | 节奏 ${p.pace ? p.pace.min + '-' + p.pace.max + 's' : '默认'} | 沟通 ${p.chatSupported === false ? '不支持' : '支持'}`);

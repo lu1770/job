@@ -65,7 +65,7 @@ job/
 │  │  ├─ boss.mjs  liepin.mjs  job51.mjs  zhaopin.mjs  yupaopin.mjs  index.mjs
 │  └─ commands/         业务流程（跨平台复用）
 │     ├─ login.mjs  scan.mjs  jd.mjs  targets.mjs
-│     ├─ apply.mjs（含 verify / --probe）  chat.mjs  history.mjs  daily.mjs
+│     ├─ apply.mjs（含 verify / --probe）  chat.mjs  history.mjs  daily.mjs  keywords.mjs
 ├─ data/               运行产物
 │  ├─ raw/ work/ lists/ logs/ history/
 ├─ reports/            日报与报告
@@ -230,7 +230,8 @@ fingerprint({title,company,salary})  // 无 URL 平台的稳定去重键
 | `chat read` | 会话巡检，`--unread-only` 只读未读 | `--max`                        |
 | `chat send` | 发回复（校验会话后才发）              | `--file`                       |
 | `history`   | 重建去重集合                    | `--platform`                   |
-| `daily`     | 全流程编排                     | `--platform` `--skip-chat`     |
+| `daily`     | 全流程编排（末尾自动跑关键词排行）        | `--platform` `--skip-chat`     |
+| `keywords`  | 当日 JD 关键词排行（只读，不去浏览器）    | `--date` `--top` `--out`       |
 
 ## 业务铁律（写进代码，勿绕过）
 

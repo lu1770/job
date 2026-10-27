@@ -1,61 +1,38 @@
-#!/usr/bin/env node
 /**
- * 当日 JD 关键词排行（只读分析，不连浏览器、不改数据源）
+ * 命令：keywords —— 当日 JD 关键词排行（只读分析，不连浏览器、不改数据源）
  *
  * 做的事：
- *   1. 读 data/logs/daily-run-<date>-*.log，抽流水线各阶段数字
- *   2. 读 data/work/<platform>-jd-<date>*.json，按平台+岗位 ID 去重
- *   3. 从 JD 正文裁出「职位介绍 → 其他信息」区段（避免推荐位/页脚污染词频）
- *   4. 词表 + 英文技术 token 双路统计，按命中 JD 数倒排（同分按总词频）
- *   5. 输出 markdown 报告 + JSON 明细
+ *   1. 读 data/work/<platform>-jd-<date>*.json，按平台 + 岗位 ID 去重
+ *   2. 从 JD 正文裁出「职位介绍 → 其他信息」区段（避开推荐位/页脚污染）
+ *   3. 词表 + 英文技术 token 双路统计，按命中 JD 数倒排（同分按总词频）
+ *   4. 输出 reports/关键词排名_<date>.md + data/work/jd-keywords-<date>.json
  *
- * 用法：
- *   node scripts/jd_keywords.mjs                          # 今天，台面输出
- *   node scripts/jd_keywords.mjs --date 20261027 --top 30
- *   node scripts/jd_keywords.mjs --out reports/关键词排名_2026-10-27.md
+ * daily 会把它放在末尾调用（传内存 summary）；单独跑时自动解析当日 daily-run log。
+ *
+ * 用法：node src/cli.mjs keywords [--date 20261027] [--top 30]
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-
-// ---------------------------------------------------------------- 参数
-
-const argv = process.argv.slice(2);
-const arg = (name, def = null) => {
-  const i = argv.indexOf(`--${name}`);
-  return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : def;
-};
-const flag = (name) => argv.includes(`--${name}`);
-
-const now = new Date();
-const today = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-const DATE = arg('date', today);
-const DATEd = `${DATE.slice(0, 4)}-${DATE.slice(4, 6)}-${DATE.slice(6, 8)}`;
-const TOP = Number(arg('top', 30));
-const OUT = arg('out', path.join(ROOT, 'reports', `关键词排名_${DATEd}.md`));
-const JSON_OUT = arg('json-out', path.join(ROOT, 'data', 'work', `jd-keywords-${DATE}.json`));
+import { DATA, REPORTS_DIR, writeJSONAtomic } from '../core/io.mjs';
 
 // ---------------------------------------------------------------- 1. log
 
-function findLog() {
-  const dir = path.join(ROOT, 'data', 'logs');
-  if (!fs.existsSync(dir)) return null;
-  const hit = fs.readdirSync(dir)
-    .filter((f) => f.startsWith(`daily-run-${DATE}-`) && f.endsWith('.log'))
-    .sort()
-    .pop();
-  return hit ? path.join(dir, hit) : null;
+function findLog(date) {
+  try {
+    const hit = fs.readdirSync(DATA.logs)
+      .filter((f) => f.startsWith(`daily-run-${date}-`) && f.endsWith('.log'))
+      .sort()
+      .pop();
+    return hit ? path.join(DATA.logs, hit) : null;
+  } catch { return null; }
 }
 
 function parseLog(file) {
   if (!file || !fs.existsSync(file)) return null;
   const text = fs.readFileSync(file, 'utf8');
-  const out = { file: path.basename(file), platforms: [], stage: {}, scanKeywords: [], apply: null, dropReasons: null };
+  const out = { file: path.basename(file), stage: {}, scanKeywords: [], apply: null, dropReasons: null };
   const collected = text.match(/采集完成：去重 (\d+) 岗｜上限≥25K：(\d+)/);
-  if (collected) out.stage.collected = [{ dedup: +collected[1], capOk: +collected[2] }];
-  out.platforms = [...text.matchAll(/##########\s+([a-z0-9]+)\s+##########/g)].map((m) => m[1]);
+  if (collected) out.stage.collected = { dedup: +collected[1], capOk: +collected[2] };
   const coarse = text.match(/粗筛通过 (\d+)（剔除 (\d+)）｜待核验 (\d+)/);
   if (coarse) out.stage.coarse = { pass: +coarse[1], drop: +coarse[2], todo: +coarse[3] };
   const verified = text.match(/核验完成：(\d+) 条/);
@@ -67,14 +44,18 @@ function parseLog(file) {
   const applied = text.match(/投递完成：成功 (\d+) \/ 已沟通 (\d+) \/ 跳过 (\d+) \/ 未知 (\d+) \/ 失败 (\d+)/);
   if (applied) out.apply = { ok: +applied[1], already: +applied[2], skipped: +applied[3], unknown: +applied[4], fail: +applied[5] };
 
-  // 采集关键词：--- <kw> --- 后紧跟「新增 N（累计 M）」
+  // 采集关键词：--- <kw> --- 后紧跟「新增 N（累计 M）」。
+  // 同一份 daily log 可能含多个平台段落，累计口径各自独立，必须带平台分组。
   let cur = null;
+  let curPlat = null;
   for (const line of text.split(/\r?\n/)) {
+    const p = line.match(/^##########\s+([a-z0-9]+)\s+##########$/);
+    if (p) { curPlat = p[1]; cur = null; continue; }
     const m = line.match(/^---\s+(.+?)\s+---$/);
     if (m) { cur = /^\d+\./.test(m[1]) ? null : m[1]; continue; }
     const n = cur && line.match(/新增 (\d+)（累计 (\d+)）/);
     if (n) {
-      out.scanKeywords.push({ keyword: cur, added: +n[1], cumulative: +n[2] });
+      out.scanKeywords.push({ platform: curPlat, keyword: cur, added: +n[1], cumulative: +n[2] });
       cur = null;
     }
   }
@@ -84,24 +65,20 @@ function parseLog(file) {
 // ---------------------------------------------------------------- 2. JD 数据
 
 function loadJds(date) {
-  const dir = path.join(ROOT, 'data', 'work');
-  if (!fs.existsSync(dir)) return { rows: [], files: [] };
-  const files = fs.readdirSync(dir)
-    .filter((f) => f.endsWith('.json') && f.includes(`-jd-${date}`))
-    .sort();
+  const files = fs.existsSync(DATA.work)
+    ? fs.readdirSync(DATA.work).filter((f) => f.endsWith('.json') && f.includes(`-jd-${date}`)).sort()
+    : [];
   const rows = [];
   const used = [];
   for (const f of files) {
     let data;
-    try { data = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch { continue; }
+    try { data = JSON.parse(fs.readFileSync(path.join(DATA.work, f), 'utf8')); } catch { continue; }
     if (!Array.isArray(data)) continue;
     const platform = f.split('-jd-')[0];
     used.push(f);
     for (const r of data) {
       if (!r || !r.jd) continue;
-      const key = platform + '|' + (r.id || r.url || `${r.title}|${r.sal}`);
-      r.__platform = platform;
-      r.__key = key;
+      r.__key = platform + '|' + (r.id || r.url || `${r.title}|${r.sal}`);
       rows.push(r);
     }
   }
@@ -138,7 +115,7 @@ function jdSection(jd) {
 
 // ---------------------------------------------------------------- 4. 词表
 
-// [规范名, 类别, 正则]（正则统一按 i 编译；中文按字面匹配）
+// [规范名, 类别, 正则]（中文按字面匹配，英文统一大小写不敏感）
 const VOCAB = [
   ['C#', '语言/框架', /c#|c\s?sharp/i],
   ['.NET', '语言/框架', /\.net(?!\s*framework)|dotnet/i],
@@ -249,7 +226,7 @@ const VOCAB = [
   ['项目管理', '软技能', /项目管理|项目统筹|项目推进/i],
   ['客户', '软技能', /客户|甲方/i],
   ['外包/驻场', '软技能', /外包|外派|驻场/i],
-].map(([name, cat, re]) => ({ name, cat, re: new RegExp(re.source, 'gi'), test: re }));
+].map(([name, cat, re]) => ({ name, cat, re: new RegExp(re.source, 'gi') }));
 
 const EN_STOP = new Set(`a an the and or of to in on at by for with from as is are be been being was were will would can could should may might must not no yes this that these those it its their our your his her they we you i he she them us me my
 job jobs work working experience years year new good strong basic ability able preferred responsible requirements requirement description responsibilities skills skill knowledge familiar excellent
@@ -285,8 +262,7 @@ function countEnTokens(rows, minDf = 3, top = 30) {
     const toks = (text.match(/[A-Za-z][A-Za-z0-9+#./_-]*/g) || [])
       .map((s) => s.toLowerCase().replace(/[._/-]+$/, ''))
       .filter((s) => s.length >= 2 && s.length <= 16 && !EN_STOP.has(s) && /[a-z]/.test(s));
-    const uniq = new Set(toks);
-    for (const t of uniq) {
+    for (const t of new Set(toks)) {
       const s = stats.get(t) || { token: t, df: 0, total: 0 };
       s.df += 1;
       stats.set(t, s);
@@ -343,102 +319,136 @@ const mdTable = (head, rows) => [
   `| ${head.map(() => '---').join(' | ')} |`,
   ...rows.map((r) => `| ${r.join(' | ')} |`),
 ].join('\n');
+const ymd = (d = new Date()) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+const NUM = ['一', '二', '三', '四', '五', '六'];
 
-function main() {
-  const logFile = arg('log', findLog());
-  const log = parseLog(logFile);
+/** 采集关键词按平台分组，组内按新增数倒排 */
+function groupScan(list) {
+  const m = new Map();
+  for (const k of list) {
+    const p = k.platform || 'unknown';
+    if (!m.has(p)) m.set(p, []);
+    m.get(p).push(k);
+  }
+  for (const v of m.values()) v.sort((a, b) => b.added - a.added);
+  return m;
+}
+
+export async function keywords(opts = {}) {
+  const { log = console.log, top = 30, summary = null } = opts;
+  const DATE = String(opts.date || ymd());
+  const DATEd = `${DATE.slice(0, 4)}-${DATE.slice(4, 6)}-${DATE.slice(6, 8)}`;
+  const OUT = opts.out || path.join(REPORTS_DIR, `关键词排名_${DATEd}.md`);
+  const JSON_OUT = opts.jsonOut || path.join(DATA.work, `jd-keywords-${DATE}.json`);
+
+  const logFile = opts.logFile || (summary ? null : findLog(DATE));
+  const parsedLog = summary ? null : parseLog(logFile);
+  const scanKeywords = (opts.scanKeywords && opts.scanKeywords.length ? opts.scanKeywords : (parsedLog ? parsedLog.scanKeywords : []));
   const { rows, files, raw } = loadJds(DATE);
   const total = rows.length;
-  if (!total) {
-    console.error(`没有找到 ${DATEd} 的 JD 数据（data/work/*-jd-${DATE}*.json）`);
-    process.exitCode = 1;
-    return;
-  }
+  if (!total) throw new Error(`没有找到 ${DATEd} 的 JD 数据（data/work/*-jd-${DATE}*.json）`);
 
-  const keywords = countKeywords(rows, TOP);
+  const kw = countKeywords(rows, top);
   const enTokens = countEnTokens(rows);
   const flags = countFlags(rows);
   const missing = rows.filter((r) => jdSection(r.jd).length < 120).length;
 
   // ---- 台面输出
-  console.log(`\n=== ${DATEd} JD 关键词排行 ===`);
-  console.log(`文件 ${files.length} 个｜原始 ${raw} 条｜去重后 ${total} 条｜正文过短 ${missing} 条`);
-  if (log) {
-    const s = log.stage;
-    console.log(`Log：${log.file}`);
-    if (s.collected?.length) console.log(`  采集去重 ${s.collected[0].dedup}｜上限≥25K ${s.collected[0].capOk}`);
-    if (s.coarse) console.log(`  粗筛通过 ${s.coarse.pass}（剔除 ${s.coarse.drop}）`);
-    if (s.targets) console.log(`  入选 ${s.targets.picked}｜剔除 ${s.targets.dropped}`);
-    if (log.apply) console.log(`  投递 成功 ${log.apply.ok} / 已沟通 ${log.apply.already} / 失败 ${log.apply.fail}`);
+  log(`\n=== ${DATEd} JD 关键词排行 ===`);
+  log(`文件 ${files.length} 个｜原始 ${raw} 条｜去重后 ${total} 条｜正文过短 ${missing} 条`);
+  if (parsedLog) {
+    const s = parsedLog.stage;
+    log(`Log：${parsedLog.file}`);
+    if (s.collected) log(`  采集去重 ${s.collected.dedup}｜上限≥25K ${s.collected.capOk}`);
+    if (s.coarse) log(`  粗筛通过 ${s.coarse.pass}（剔除 ${s.coarse.drop}）`);
+    if (s.targets) log(`  入选 ${s.targets.picked}｜剔除 ${s.targets.dropped}`);
+    if (parsedLog.apply) log(`  投递 成功 ${parsedLog.apply.ok} / 已沟通 ${parsedLog.apply.already} / 失败 ${parsedLog.apply.fail}`);
   }
-  if (log && log.scanKeywords.length) {
-    console.log('\n-- 采集关键词（按新增岗位数倒排）--');
-    [...log.scanKeywords].sort((a, b) => b.added - a.added)
-      .forEach((k, i) => console.log(`${String(i + 1).padStart(2)}. ${k.keyword.padEnd(10, ' ')} 新增 ${k.added}  累计 ${k.cumulative}`));
+  if (scanKeywords.length) {
+    for (const [pid, list] of groupScan(scanKeywords)) {
+      log(`\n-- 采集关键词（${pid}，按新增岗位数倒排）--`);
+      list.forEach((k, i) => log(`${String(i + 1).padStart(2)}. ${k.keyword.padEnd(10, ' ')} 新增 ${k.added}  累计 ${k.cumulative}`));
+    }
   }
-  console.log(`\n-- JD 关键词 Top ${Math.min(15, keywords.length)}（按命中 JD 数倒排）--`);
-  keywords.slice(0, 15).forEach((k, i) => {
-    console.log(`${String(i + 1).padStart(2)}. ${k.keyword.padEnd(12, ' ')} ${String(k.df).padStart(3)} 份 (${pct(k.df, total)})  词频 ${k.total}  [${k.cat}]`);
+  log(`\n-- JD 关键词 Top ${Math.min(15, kw.length)}（按命中 JD 数倒排）--`);
+  kw.slice(0, 15).forEach((k, i) => {
+    log(`${String(i + 1).padStart(2)}. ${k.keyword.padEnd(12, ' ')} ${String(k.df).padStart(3)} 份 (${pct(k.df, total)})  词频 ${k.total}  [${k.cat}]`);
   });
-  console.log('\n-- 技术栈标记（正文重算 / 整页流水线）--');
-  flags.slice(0, 10).forEach((f) => console.log(`${f.label.padEnd(12, ' ')} ${String(f.df).padStart(3)} 份 (${pct(f.df, total)})  整页 ${f.pipelineDf}`));
+  log('\n-- 技术栈标记（正文重算 / 整页流水线）--');
+  flags.slice(0, 10).forEach((f) => log(`${f.label.padEnd(12, ' ')} ${String(f.df).padStart(3)} 份 (${pct(f.df, total)})  整页 ${f.pipelineDf}`));
 
   // ---- 报告
-  const scanRanked = log ? [...log.scanKeywords].sort((a, b) => b.added - a.added) : [];
   const lines = [];
+  let n = 0;
+  const h = (title) => { lines.push('', `## ${NUM[n++]}、${title}`, ''); };
   lines.push(`# 当日 JD 关键词排行（${DATEd}）`, '');
-  lines.push(`> 数据：\`data/work/${files.join('`、`')}\` 去重后 **${total}** 份 JD；`
-    + `log：\`${log ? `data/logs/${log.file}` : '未找到'}\`。`, '');
+  lines.push(`> 数据：\`data/work/${files.join('`、`')}\` 去重后 **${total}** 份 JD。`, '');
 
-  if (log) {
-    lines.push('## 一、Log 概览', '');
-    const st = [];
-    if (log.stage.collected?.length) st.push(['采集去重', log.stage.collected[0].dedup, '岗']);
-    if (log.stage.collected?.length) st.push(['薪资上限 ≥25K', log.stage.collected[0].capOk, '岗']);
-    if (log.stage.coarse) st.push(['粗筛通过', log.stage.coarse.pass, `岗（剔除 ${log.stage.coarse.drop}）`]);
-    if (log.stage.verified) st.push(['JD 实读核验', log.stage.verified, '条']);
-    if (log.stage.targets) st.push(['投递清单入选', log.stage.targets.picked, `条（剔除 ${log.stage.targets.dropped}）`]);
-    if (log.apply) st.push(['最终投递', `${log.apply.ok} 成功 / ${log.apply.already} 已沟通 / ${log.apply.fail} 失败`, '']);
-    lines.push(mdTable(['阶段', '数量', '说明'], st));
-    if (log.dropReasons) {
-      lines.push('', '剔除原因：', '');
-      lines.push(mdTable(['原因', '条数'], Object.entries(log.dropReasons).map(([k, v]) => [k, v])));
+  const plats = summary?.platforms ? Object.entries(summary.platforms) : [];
+  if (plats.length) {
+    h('当日流水线');
+    lines.push(mdTable(['平台', '采集', 'JD 核验', '入选', '投递 成功/已沟通/失败'], plats.map(([pid, p]) => [
+      pid,
+      p.scan?.total ?? '—',
+      p.jd?.count ?? '—',
+      p.targets?.count ?? '—',
+      p.apply ? `${p.apply.ok} / ${p.apply.already} / ${p.apply.fail}` : (p.skipped ? `跳过:${p.skipped}` : '—'),
+    ])));
+    if (summary.env?.platforms) {
+      const bad = Object.entries(summary.env.platforms).filter(([, v]) => v && v.ok === false).map(([pid]) => pid);
+      if (bad.length) lines.push('', `> 未登录/跳过：${bad.join('、')}`);
     }
-    lines.push('');
+  } else if (parsedLog) {
+    h('Log 概览');
+    const st = [];
+    if (parsedLog.stage.collected) st.push(['采集去重', parsedLog.stage.collected.dedup, '岗']);
+    if (parsedLog.stage.collected) st.push(['薪资上限 ≥25K', parsedLog.stage.collected.capOk, '岗']);
+    if (parsedLog.stage.coarse) st.push(['粗筛通过', parsedLog.stage.coarse.pass, `岗（剔除 ${parsedLog.stage.coarse.drop}）`]);
+    if (parsedLog.stage.verified) st.push(['JD 实读核验', parsedLog.stage.verified, '条']);
+    if (parsedLog.stage.targets) st.push(['投递清单入选', parsedLog.stage.targets.picked, `条（剔除 ${parsedLog.stage.targets.dropped}）`]);
+    if (parsedLog.apply) st.push(['最终投递', `${parsedLog.apply.ok} 成功 / ${parsedLog.apply.already} 已沟通 / ${parsedLog.apply.fail} 失败`, '']);
+    lines.push(mdTable(['阶段', '数量', '说明'], st));
+    if (parsedLog.dropReasons) {
+      lines.push('', '剔除原因：', '');
+      lines.push(mdTable(['原因', '条数'], Object.entries(parsedLog.dropReasons).map(([k, v]) => [k, v])));
+    }
   }
 
-  if (scanRanked.length) {
-    lines.push('## 二、采集关键词效果（按新增岗位数倒排）', '');
-    lines.push(mdTable(['排名', '采集关键词', '新增岗位', '累计'],
-      scanRanked.map((k, i) => [i + 1, k.keyword, k.added, k.cumulative])));
-    lines.push('', '> 增量口径：关键词按顺序采集，新增数受前面关键词去重后的剩余池影响，排名只反映「当轮边际产出」。', '');
+  const scanGroups = groupScan(scanKeywords);
+  if (scanGroups.size) {
+    h('采集关键词效果（按新增岗位数倒排）');
+    const srows = [];
+    for (const [pid, list] of scanGroups) {
+      list.forEach((k, i) => srows.push([pid, i + 1, k.keyword, k.added, k.cumulative]));
+    }
+    lines.push(mdTable(['平台', '排名', '采集关键词', '新增岗位', '累计'], srows));
+    lines.push('', '> 增量口径：关键词按顺序采集，新增数受前面关键词去重后的剩余池影响，排名只反映「当轮边际产出」；各平台累计独立。');
   }
 
-  const maxDf = keywords[0]?.df || 1;
-  lines.push(`## 三、JD 关键词排行（标题 + 裁后正文，${total} 份 JD，按命中 JD 数倒排）`, '');
+  const maxDf = kw[0]?.df || 1;
+  h(`JD 关键词排行（标题 + 裁后正文，${total} 份 JD，按命中 JD 数倒排）`);
   lines.push(mdTable(['排名', '关键词', '类别', '命中 JD', '覆盖率', '总词频', '词频条'],
-    keywords.map((k, i) => [
+    kw.map((k, i) => [
       i + 1, k.keyword, k.cat, k.df, pct(k.df, total), k.total,
       '█'.repeat(Math.max(1, Math.round((k.df / maxDf) * 18))),
     ])));
-  lines.push('', `> 覆盖率为「提到该词的 JD 数 ÷ 有效 JD 总数 ${total}」；统计文本 = 岗位标题 + 裁后正文，同分按总词频排序。`, '');
+  lines.push('', `> 覆盖率为「提到该词的 JD 数 ÷ 有效 JD 总数 ${total}」；统计文本 = 岗位标题 + 裁后正文，同分按总词频排序。`);
 
-  lines.push('## 四、结构化技术栈分布（按裁后正文重算）', '');
+  h('结构化技术栈分布（按裁后正文重算）');
   lines.push(mdTable(['技术栈', '标记', '正文命中', '覆盖率', '流水线标记（整页）'],
     flags.map((f) => [f.label, f.flag, f.df, pct(f.df, total), f.pipelineDf])));
-  lines.push('', '> 「流水线标记」是 `jd` 阶段读整页 `innerText` 的结果，含「猜你喜欢 / 热门城市」推荐位，会虚高（如销售、嵌入式）。', '');
-  lines.push('> 另：`core/criteria.mjs` 的 `techFlags()` 里 `cpp`/`java` 正则未加 `i`，对「C++」「Java」大写写法漏判，故本表按大小写不敏感重算。', '');
+  lines.push('', '> 「流水线标记」是 `jd` 阶段读整页 `innerText` 的结果，含「猜你喜欢 / 热门城市」推荐位，会虚高（如销售、嵌入式）。');
+  lines.push('> 另：`core/criteria.mjs` 的 `techFlags()` 里 `cpp`/`java` 正则未加 `i`，对「C++」「Java」大写写法漏判，故本表按大小写不敏感重算。');
 
-  lines.push('## 五、高频英文技术词（自动抽取）', '');
+  h('高频英文技术词（自动抽取）');
   lines.push(mdTable(['排名', 'token', '命中 JD', '覆盖率', '总词频'],
     enTokens.map((t, i) => [i + 1, t.token, t.df, pct(t.df, total), t.total])));
-  lines.push('');
 
-  lines.push('## 附：口径与局限', '');
+  h('口径与局限');
   lines.push(`- 正文只取「职位介绍/职位描述 → 其他信息/猜你喜欢」区段，避免推荐位与页脚关键词污染；正文 <120 字符的 ${missing} 条保留原样。`);
   lines.push('- 中文无分词器，关键词走**预置词表**字面匹配；英文 token 走正则抽取（去掉停用词、要求命中 ≥3 份 JD），用于兜住词表外的技术词。');
   lines.push('- 去重键 = 平台 + 岗位 ID；同一天多次核验的重复记录只算一次。');
-  lines.push('- 仅统计出现频次，不代表岗位质量或匹配度；`flags` 由流水线 `techFlags()` 判定，与正文词频互相独立。');
+  lines.push('- 仅统计出现频次，不代表岗位质量或匹配度。');
 
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   fs.writeFileSync(OUT, lines.join('\n'), 'utf8');
@@ -448,17 +458,17 @@ function main() {
     generatedAt: new Date().toISOString(),
     totalJd: total,
     files,
-    log: log ? { file: log.file, stage: log.stage, apply: log.apply, dropReasons: log.dropReasons, scanKeywords: scanRanked } : null,
-    keywords,
+    log: parsedLog ? { file: parsedLog.file, stage: parsedLog.stage, apply: parsedLog.apply, dropReasons: parsedLog.dropReasons } : null,
+    scanKeywords,
+    keywords: kw,
     enTokens,
     flags,
   };
-  fs.mkdirSync(path.dirname(JSON_OUT), { recursive: true });
-  fs.writeFileSync(JSON_OUT, JSON.stringify(payload, null, 1), 'utf8');
+  writeJSONAtomic(JSON_OUT, payload);
 
-  console.log(`\n报告 -> ${OUT}`);
-  console.log(`明细 -> ${JSON_OUT}`);
-  if (flag('quiet')) process.exitCode = 0;
+  log(`\n报告 -> ${OUT}`);
+  log(`明细 -> ${JSON_OUT}`);
+  return { total, files, out: OUT, jsonOut: JSON_OUT, keywords: kw };
 }
 
-main();
+export const help = 'keywords [--date YYYYMMDD] [--top N] [--out file] [--json-out file]';

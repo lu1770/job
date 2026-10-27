@@ -19,6 +19,7 @@ export async function scan(opts = {}) {
 
   const file = out || dataPath('raw', `${pid}-scan`);
   const all = [];
+  const kwStats = [];
   const seen = new Set();
   let stopped = null;
 
@@ -61,6 +62,7 @@ export async function scan(opts = {}) {
         + (dupInKeyword ? ` | 合并后重复 ${dupInKeyword}` : ''));
     }
     log(`  扫到 ${items.length}，新增 ${added}（累计 ${all.length}）`);
+    kwStats.push({ keyword: kw, added, cumulative: all.length });
     writeJSONAtomic(file, all);   // 增量落盘：中途挂起也不丢
     await sleep(2500);
   }
@@ -70,7 +72,7 @@ export async function scan(opts = {}) {
   log(`\n采集完成：去重 ${all.length} 岗｜上限≥${capKMin}K：${hit.length}`);
   if (stopped) log(`⚠️ 未跑完：${JSON.stringify(stopped)}`);
   cdp.close();
-  return { file, total: all.length, hit: hit.length, stopped, items: all };
+  return { file, total: all.length, hit: hit.length, stopped, keywords: kwStats, items: all };
 }
 
 /** 岗位 id：条目自带 id 优先，其次按平台 ID_RE 从 URL 提取（与 history 同一份正则） */
