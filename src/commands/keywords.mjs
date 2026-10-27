@@ -334,6 +334,40 @@ function groupScan(list) {
   return m;
 }
 
+/** 把 JD 关键词转成能直接丢进搜索框的形式："多线程/并发" → "多线程"；TCP/IP 这类纯英文保持原样 */
+function searchForm(k) {
+  const s = String(k || '').trim();
+  if (!s.includes('/')) return s;
+  const cjk = s.split('/').find((x) => /[\u4e00-\u9fa5]/.test(x));
+  return (cjk || s).trim();
+}
+
+/**
+ * 取 beforeDate 之前最近一天的 JD 关键词排行前 n 个（daily 未传 --keywords 时兜底）。
+ * 返回 null 表示没有可用的历史排行。
+ */
+export function topKeywordsFrom(beforeDate, n = 10) {
+  if (!fs.existsSync(DATA.work)) return null;
+  const file = fs.readdirSync(DATA.work)
+    .map((f) => { const m = f.match(/^jd-keywords-(\d{8})\.json$/); return m && m[1] < String(beforeDate) ? { f, d: m[1] } : null; })
+    .filter(Boolean)
+    .sort((a, b) => (a.d < b.d ? -1 : 1))
+    .pop();
+  if (!file) return null;
+  let payload;
+  try { payload = JSON.parse(fs.readFileSync(path.join(DATA.work, file.f), 'utf8')); } catch { return null; }
+  const seen = new Set();
+  const out = [];
+  for (const k of payload.keywords || []) {
+    const q = searchForm(k.keyword);
+    if (!q || seen.has(q)) continue;
+    seen.add(q);
+    out.push(q);
+    if (out.length >= n) break;
+  }
+  return out.length ? { date: file.d, keywords: out } : null;
+}
+
 export async function keywords(opts = {}) {
   const { log = console.log, top = 30, summary = null } = opts;
   const DATE = String(opts.date || ymd());

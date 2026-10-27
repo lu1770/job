@@ -5,15 +5,11 @@ BOSS 直聘 / 猎聘 / 智联招聘 / 前程无忧 51job / **鱼泡直聘** 的�
 **零第三方依赖**，直接用 Node 内置 WebSocket 驱动原生 CDP。
 
 > 2026-10-10 由 88 个一次性脚本重构而来：代码与数据分离、重复功能合并为 4 层架构。
-> 旧脚本见 
->
+> 旧脚本见
 > `legacy/MAPPING.md`
->
 > （含合并映射）。
 > 2026-10-13 新增鱼泡直聘（
->
 > `platforms/yupaopin.mjs`
->
 > ）。
 
 
@@ -30,13 +26,10 @@ node src/cli.mjs login                  # 环境 + 四平台登录态核验（�
 node src/cli.mjs daily --platform liepin,boss   # 每日全流程
 ```
 
-> Windows 注意事项：环境变量 
->
+> Windows 注意事项：环境变量
 > `HTTP_PROXY`
->
->  会劫持本地 CDP 请求，所有命令需带
+> 会劫持本地 CDP 请求，所有命令需带
 > `NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost`
->
 > 。
 
 ## 目录结构
@@ -219,19 +212,19 @@ fingerprint({title,company,salary})  // 无 URL 平台的稳定去重键
 
 
 
-| 命令          | 作用                        | 常用参数                           |
-| ----------- | ------------------------- | ------------------------------ |
-| `login`     | CDP 可达性 + 登录态（只读）         | `--platform`                   |
-| `scan`      | 多关键词采集，逐关键词容错 + 增量落盘      | `--keywords` `--cap`           |
-| `jd`        | 逐岗实读 JD，判定技术栈 / 年龄限制      | `--in` `--no-dedupe` `--limit` |
-| `targets`   | 生成最终投递清单 + 剔除原因统计         | `--in`                         |
-| `apply`     | 批量投递（已沟通自动跳过）             | `--in` `--retry-logs`          |
-| `verify`    | 复核；`--probe` 为只读巡检不点击     | `--in` `--probe`               |
-| `chat read` | 会话巡检，`--unread-only` 只读未读 | `--max`                        |
-| `chat send` | 发回复（校验会话后才发）              | `--file`                       |
-| `history`   | 重建去重集合                    | `--platform`                   |
-| `daily`     | 全流程编排（末尾自动跑关键词排行）        | `--platform` `--skip-chat`     |
-| `keywords`  | 当日 JD 关键词排行（只读，不去浏览器）    | `--date` `--top` `--out`       |
+| 命令          | 作用                                             | 常用参数                           |
+| ----------- | ---------------------------------------------- | ------------------------------ |
+| `login`     | CDP 可达性 + 登录态（只读）                              | `--platform`                   |
+| `scan`      | 多关键词采集，逐关键词容错 + 增量落盘                           | `--keywords` `--cap`           |
+| `jd`        | 逐岗实读 JD，判定技术栈 / 年龄限制                           | `--in` `--no-dedupe` `--limit` |
+| `targets`   | 生成最终投递清单 + 剔除原因统计                              | `--in`                         |
+| `apply`     | 批量投递（已沟通自动跳过）                                  | `--in` `--retry-logs`          |
+| `verify`    | 复核；`--probe` 为只读巡检不点击                          | `--in` `--probe`               |
+| `chat read` | 会话巡检，`--unread-only` 只读未读                      | `--max`                        |
+| `chat send` | 发回复（校验会话后才发）                                   | `--file`                       |
+| `history`   | 重建去重集合                                         | `--platform`                   |
+| `daily`     | 全流程编排（末尾自动跑关键词排行；不传 `--keywords` 时沿用上一日 Top10） | `--platform` `--skip-chat`     |
+| `keywords`  | 当日 JD 关键词排行（只读，不去浏览器）                          | `--date` `--top` `--out`       |
 
 ## 业务铁律（写进代码，勿绕过）
 

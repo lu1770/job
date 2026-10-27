@@ -12,10 +12,11 @@ import { sleep } from '../core/cdp.mjs';
 
 export async function scan(opts = {}) {
   const { platform: pid, keywords, out, capKMin = 25, log = console.log } = opts;
-  const kws = parseList(keywords);
   // 平台内多刷新次数（如 BOSS 推荐视图靠反复刷新换结果去重；1 = 关闭）
   const refresh = opts.refresh ? Number(opts.refresh) : undefined;
   const { cdp, platform } = await session(pid, { tabId: opts.tabId });
+  // 没给 --keywords 时用平台默认词表（daily 会优先传上一日关键词 Top10）
+  const kws = parseList(keywords, platform.DEFAULT_KEYWORDS || []);
 
   const file = out || dataPath('raw', `${pid}-scan`);
   const all = [];

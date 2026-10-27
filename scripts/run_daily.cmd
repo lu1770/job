@@ -41,7 +41,7 @@ echo WARNING: CDP still unreachable after 60s - job will likely abort at login c
 
 :RUN_JOB
 cd /d "%JOBDIR%"
-"%NODE%" src/cli.mjs daily --platform liepin,boss,zhaopin,job51 --keywords ".NET,C#,上位机,wpf,winform,webform" >> "%LOG%" 2>&1
+"%NODE%" src/cli.mjs daily --platform liepin,boss,zhaopin,job51 >> "%LOG%" 2>&1
 if errorlevel 1 (set "RC=1") else (set "RC=0")
 for /f "delims=" %%t in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd_HH-mm-ss"') do echo END %%t rc=%RC% >> "%LOG%"
 exit /b %RC%
