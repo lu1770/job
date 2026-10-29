@@ -11,7 +11,8 @@ import { dataPath, readJSON, latestDataFile, createSink } from '../core/io.mjs';
 import { sleep, navigate } from '../core/cdp.mjs';
 import { capK } from '../core/salary.mjs';
 import { blockedCompany, coarseScreen, requireScreen, cityOk, criteria } from '../core/criteria.mjs';
-import { loadHistory, historyIndex, isSeen, keyByTitleSalary, keyByTitleCompany } from '../core/dedupe.mjs';
+import { loadHistory, historyIndex, isSeen } from '../core/dedupe.mjs';
+import { dedupeProfile } from '../platforms/index.mjs';
 
 export async function jd(opts = {}) {
   const { platform: pid, capKMin = criteria().capKMin, dedupe = true, limit = 0, log = console.log } = opts;
@@ -24,9 +25,8 @@ export async function jd(opts = {}) {
 
   // ---- 前置过滤（不进详情页）
   const hist = historyIndex(loadHistory(pid));
-  // 鱼泡同标题同薪资的岗位很多（如「软件工程师 1.1-1.6万」在不同公司），
-  // 用「标题+薪资」会误杀，必须像 BOSS 一样按「标题+公司」消歧。
-  const keyFn = (pid === 'boss' || pid === 'yupaopin') ? keyByTitleCompany : keyByTitleSalary;
+  // 去重口径统一来自平台注册表（BOSS/鱼泡按标题+公司，猎聘/51job按标题+薪资，智联按卡KEY）
+  const dedupeInfo = dedupeProfile(pid);
   const dropped = [];
   let cand = [];
   for (const j of base) {
@@ -38,7 +38,7 @@ export async function jd(opts = {}) {
     const coarse = coarseScreen(title);
     if (!coarse.ok) { dropped.push({ ...j, why: coarse.why }); continue; }
     if (!requireScreen(title)) { dropped.push({ ...j, why: '非开发主线' }); continue; }
-    if (dedupe && isSeen(hist, j, keyFn)) { dropped.push({ ...j, why: '历史已处理' }); continue; }
+    if (dedupe && isSeen(hist, j, dedupeInfo.keyOf, dedupeInfo.idRe)) { dropped.push({ ...j, why: '历史已处理（已投递/已核验）' }); continue; }
     cand.push(j);
   }
   if (limit) cand = cand.slice(0, limit);

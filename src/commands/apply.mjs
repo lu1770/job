@@ -11,7 +11,10 @@
 import { session } from '../core/session.mjs';
 import { readJSON, latestDataFile, dataPath, createSink } from '../core/io.mjs';
 import { sleep } from '../core/cdp.mjs';
-import { paceOf } from '../platforms/index.mjs';
+import { dedupeProfile, paceOf } from '../platforms/index.mjs';
+import {
+  APPLIED_RESULTS, loadHistory, historyIndex, isSeen, createHistoryRecorder,
+} from '../core/dedupe.mjs';
 
 export async function apply(opts = {}) {
   const { platform: pid, log = console.log } = opts;
@@ -42,8 +45,12 @@ export async function apply(opts = {}) {
   const file = opts.out || dataPath('logs', `${pid}-${mode}`);
   const sink = createSink(file);
   const pace = paceOf(platform);
+  // 已投递台账：投递前查一遍直接跳过，投递成功后再逐条写回
+  const profile = dedupeProfile(pid);
+  const seenIndex = historyIndex(loadHistory(pid));
+  const ledger = createHistoryRecorder(pid, profile.keyOf, profile.idRe);
 
-  let ok = 0, already = 0, fail = 0, unknown = 0, skipped = 0;
+  let ok = 0, already = 0, fail = 0, unknown = 0, skipped = 0, dedup = 0;
   let stopped = null;
   let quota = null;
 
@@ -59,9 +66,17 @@ export async function apply(opts = {}) {
     const item = items[i];
     const rec = { ...item };
     const tag = `[${i + 1}/${items.length}] ${(item.title || '').slice(0, 26)} ${item.sal || ''}`;
+    // 台账命中：这条已经投过（或已沟通），不再进详情页，直接跳过。
+    // 重投模式除外 —— 它专挑上次失败的行，这些行本就不在台账里，若因「已核验清单」命中而跳过会失去重试意义。
+    if (mode !== 'retry' && isSeen(seenIndex, item, profile.keyOf, profile.idRe)) {
+      dedup++;
+      log(`${tag} -> ⏭ 已投递（台账跳过）`);
+      continue;
+    }
     try {
       const r = await platform.applyOne(cdp, item);
       Object.assign(rec, r);          // 含 freshUrl（token 恢复后回填），随日志落盘供复用
+      if (APPLIED_RESULTS.has(r.result)) ledger.add({ ...item, ...r }); // 成功即写台账
       if (r.result === 'ok') ok++;
       else if (r.result === 'already') already++;
       else if (r.result === 'unknown') unknown++;
@@ -91,10 +106,12 @@ export async function apply(opts = {}) {
   }
 
   sink.flush();
+  ledger.flush();
   cdp.close();
-  log(`\n===== ${platform.label} 投递完成：成功 ${ok} / 已沟通 ${already} / 跳过 ${skipped} / 未知 ${unknown} / 失败 ${fail} =====`);
+  log(`\n===== ${platform.label} 投递完成：成功 ${ok} / 已沟通 ${already} / 台账跳过 ${dedup} / 跳过 ${skipped} / 未知 ${unknown} / 失败 ${fail} =====`);
+  log(`已投递台账：本次新增 ${ledger.added} 条（累计 ${ledger.applied} 条）`);
   if (stopped) log(`⚠️ 提前停止：${stopped} ${quota ? JSON.stringify(quota) : ''}`);
-  return { count: sink.rows.length, ok, already, skipped, unknown, fail, log: file, stopped, quota, rows: sink.rows };
+  return { count: sink.rows.length, ok, already, skipped, unknown, fail, dedup, ledger: { added: ledger.added, total: ledger.applied }, log: file, stopped, quota, rows: sink.rows };
 }
 
 /**

@@ -7,7 +7,7 @@ import { session } from '../core/session.mjs';
 import { parseList } from '../platforms/index.mjs';
 import { dataPath, writeJSONAtomic } from '../core/io.mjs';
 import { capK } from '../core/salary.mjs';
-import { firstMatch } from '../core/url.mjs';
+import { jobIdOf } from '../core/dedupe.mjs';
 import { sleep } from '../core/cdp.mjs';
 
 export async function scan(opts = {}) {
@@ -76,12 +76,9 @@ export async function scan(opts = {}) {
   return { file, total: all.length, hit: hit.length, stopped, keywords: kwStats, items: all };
 }
 
-/** 岗位 id：条目自带 id 优先，其次按平台 ID_RE 从 URL 提取（与 history 同一份正则） */
+/** 岗位 id：统一走 core/dedupe 的唯一实现；无 ID_RE 平台（智联）退回 href */
 function jobId(platform, j) {
-  if (j.id) return j.id;
-  if (j.jobId) return j.jobId;
-  const href = j.href || j.url || '';
-  return (platform.ID_RE && firstMatch(href, [platform.ID_RE])) || href || '';
+  return jobIdOf(j, platform.ID_RE) || j.href || j.url || '';
 }
 
 export const help = 'scan --platform <boss|liepin|job51|zhaopin|yupaopin> [--keywords "a,b"] [--cap 25] [--tab <id>]';

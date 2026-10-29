@@ -218,11 +218,11 @@ fingerprint({title,company,salary})  // 无 URL 平台的稳定去重键
 | `scan`      | 多关键词采集，逐关键词容错 + 增量落盘                           | `--keywords` `--cap`           |
 | `jd`        | 逐岗实读 JD，判定技术栈 / 年龄限制                           | `--in` `--no-dedupe` `--limit` |
 | `targets`   | 生成最终投递清单 + 剔除原因统计                              | `--in`                         |
-| `apply`     | 批量投递（已沟通自动跳过）                                  | `--in` `--retry-logs`          |
+| `apply`     | 批量投递（已沟通 / 台账已投递自动跳过）                       | `--in` `--retry-logs`          |
 | `verify`    | 复核；`--probe` 为只读巡检不点击                          | `--in` `--probe`               |
 | `chat read` | 会话巡检，`--unread-only` 只读未读                      | `--max`                        |
 | `chat send` | 发回复（校验会话后才发）                                   | `--file`                       |
-| `history`   | 重建去重集合                                         | `--platform`                   |
+| `history`   | 重建去重台账（只统计投递日志中 ok/already，失败行不写入）           | `--platform` `--from-legacy`   |
 | `daily`     | 全流程编排（末尾自动跑关键词排行；不传 `--keywords` 时沿用上一日 Top10） | `--platform` `--skip-chat`     |
 | `keywords`  | 当日 JD 关键词排行（只读，不去浏览器）                          | `--date` `--top` `--out`       |
 

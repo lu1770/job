@@ -14,6 +14,7 @@ import { targets } from './targets.mjs';
 import { apply, verify } from './apply.mjs';
 import { chatRead } from './chat.mjs';
 import { keywords, topKeywordsFrom } from './keywords.mjs';
+import { rebuildHistory } from './history.mjs';
 import { PRIORITY, parseList, getPlatform } from '../platforms/index.mjs';
 import { openTab, sleep } from '../core/cdp.mjs';
 import { writeJSONAtomic, DATA } from '../core/io.mjs';
@@ -67,6 +68,13 @@ export async function daily(opts = {}) {
         summary.platforms[pid] = { skipped: 'not_logged_in' };
         continue;
       }
+      log('\n--- 0. 已投递台账 ---');
+      let hist = { applied: 0, ids: [], keys: [] };
+      try {
+        hist = await rebuildHistory({ platform: pid, log });
+      } catch (e) {
+        log(`⚠️ 台账重建失败，继续执行：${e.message}`);
+      }
       log('\n--- 1. 采集 ---');
       const s = await scan({ ...opts, ...P, keywords: scanKeywords.join(',') || undefined });
       if (s.stopped && !s.total) { summary.platforms[pid] = { stopped: s.stopped }; continue; }
@@ -92,9 +100,10 @@ export async function daily(opts = {}) {
 
       summary.platforms[pid] = {
         scan: { file: s.file, total: s.total, hit: s.hit, keywords: s.keywords },
+        history: { applied: hist.applied, ids: hist.ids.length },
         jd: { file: j.file, count: j.count, stopped: j.stopped },
         targets: { file: t.file, count: t.keep.length },
-        apply: { ok: a.ok, already: a.already, skipped: a.skipped, unknown: a.unknown, fail: a.fail, stopped: a.stopped, quota: a.quota, log: a.log },
+        apply: { ok: a.ok, already: a.already, skipped: a.skipped, dedup: a.dedup, ledger: a.ledger, unknown: a.unknown, fail: a.fail, stopped: a.stopped, quota: a.quota, log: a.log },
         verify: { ok: v.ok, already: v.already, skipped: v.skipped, unknown: v.unknown, fail: v.fail },
         chat: chat ? { needReply: (chat.needReply || []).length } : null,
       };
