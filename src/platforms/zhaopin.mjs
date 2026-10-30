@@ -17,6 +17,7 @@ import { evalJson, evalJs, sleep, clickAt, navigate } from '../core/cdp.mjs';
 import { makeReadJd } from '../core/readjd.mjs';
 import { multiScan } from '../core/multiscan.mjs';
 import { fingerprint } from '../core/url.mjs';
+import { cityCodeFor, DEFAULT_CITY } from '../core/city.mjs';
 
 /** 智联卡片内没有职位详情 URL，id 靠 cardKey 指纹，不走 URL 正则 */
 export const ID_RE = null;
@@ -26,15 +27,15 @@ export const label = '智联招聘';
 
 export const DEFAULT_KEYWORDS = ['.NET', 'C#', '上位机', 'WPF', 'MES'];
 
-export const JL = '639';                       // 苏州
 export const SITE = 'https://www.zhaopin.com';
 export const pace = { min: 6, max: 12 };
 
 /** 本平台不通过 URL 定位岗位 */
 export const detailStrategy = 'panel';
 
-export function searchUrl(keyword) {
-  return `${SITE}/jobs?jl=${JL}&kw=${encodeURIComponent(keyword)}`;
+export function searchUrl(keyword, city = DEFAULT_CITY) {
+  const jl = cityCodeFor(city, 'zhaopin');
+  return `${SITE}/jobs?jl=${jl}&kw=${encodeURIComponent(keyword)}`;
 }
 
 export const homeUrl = searchUrl('.NET');
@@ -94,8 +95,8 @@ const SCAN_CARDS = `(function(){
 })()`;
 
 /** 单轮：导航 → 排「高薪」→ 扫卡片 */
-async function scanOnce(cdp, keyword) {
-  await navigate(cdp, searchUrl(keyword), { settle: 3400 });
+async function scanOnce(cdp, keyword, { city = DEFAULT_CITY } = {}) {
+  await navigate(cdp, searchUrl(keyword, city), { settle: 3400 });
   const g = await guard(cdp);
   if (!g || g.slider || g.loginWall) return { items: [], stopped: g };
   await sortBySalary(cdp);
@@ -105,8 +106,8 @@ async function scanOnce(cdp, keyword) {
 }
 
 /** 单关键词采集：刷新 N 次合并去重（默认 1 = 关闭；去重键 = 卡片指纹，与 normalize 一致） */
-export async function scanKeyword(cdp, keyword, { refresh = 1 } = {}) {
-  return multiScan(() => scanOnce(cdp, keyword), {
+export async function scanKeyword(cdp, keyword, { refresh = 1, city = DEFAULT_CITY } = {}) {
+  return multiScan(() => scanOnce(cdp, keyword, { city }), {
     refresh,
     keyOf: (j) => fingerprint({ title: j.title, company: j.company, salary: j.sal }),
   });
@@ -124,7 +125,7 @@ export async function sortBySalary(cdp) {
  * normalize：**不生成 URL**，产出卡片定位信息。
  * cardKey =「标题|薪资|公司」三段指纹 —— 智联岗位没有稳定 URL，这是唯一可靠的去重键。
  */
-export function normalize(items) {
+export function normalize(items, city = DEFAULT_CITY) {
   return items.map((j) => {
     const cardKey = fingerprint({ title: j.title, company: j.company, salary: j.sal });
     return { ...j, id: cardKey, cardKey, cardIndex: j.i, url: '' };

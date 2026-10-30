@@ -15,9 +15,10 @@ import { apply, verify } from './apply.mjs';
 import { chatRead } from './chat.mjs';
 import { keywords, topKeywordsFrom } from './keywords.mjs';
 import { rebuildHistory } from './history.mjs';
-import { PRIORITY, parseList, getPlatform } from '../platforms/index.mjs';
+import { PRIORITY, parseList } from '../platforms/index.mjs';
 import { openTab, sleep } from '../core/cdp.mjs';
 import { writeJSONAtomic, DATA } from '../core/io.mjs';
+import { homeUrlFor } from '../core/city.mjs';
 import path from 'node:path';
 
 export async function daily(opts = {}) {
@@ -58,7 +59,7 @@ export async function daily(opts = {}) {
     const P = { platform: pid };
     if (opts.tabId) P.tabId = opts.tabId;
     else {
-      const tab = await openTab(getPlatform(pid).homeUrl || 'about:blank');
+      const tab = await openTab(homeUrlFor(pid, opts.city));
       await sleep(2000);
       P.tabId = tab.id;
     }

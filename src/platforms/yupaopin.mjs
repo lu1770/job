@@ -33,6 +33,7 @@ import { evalJson, evalJs, sleep, clickAt, navigate, rand } from '../core/cdp.mj
 import { withFlags } from '../core/readjd.mjs';
 import { multiScan } from '../core/multiscan.mjs';
 import { parseSalary } from '../core/salary.mjs';
+import { cityCodeFor, DEFAULT_CITY, resolveCity } from '../core/city.mjs';
 
 export const id = 'yupaopin';
 export const label = '鱼泡直聘';
@@ -41,8 +42,6 @@ export const DEFAULT_KEYWORDS = [
   '.NET', 'C#', '上位机', 'WPF', 'WinForm', 'MES', '软件工程师',
 ];
 
-/** 苏州在鱼泡的站点编码：/topic/a221c0/ → a=区域(221 苏州)，c=职位分类(0 全部) */
-export const CITY_CODE = 'a221';
 export const CAT_ALL = 'c0';
 export const SITE = 'https://www.yupao.com';
 
@@ -60,11 +59,18 @@ export const pace = { min: 15, max: 30 }; // 有 WAF + 访问量未知，宁慢�
  */
 export const ID_RE = /(?:yupao\.com)?\/zhaogong\/(\d+)/;
 
-export function searchUrl(keyword) {
-  return `${SITE}/topic/${CITY_CODE}${CAT_ALL}/?keywords=${encodeURIComponent(keyword)}`;
+export function searchUrl(keyword, city = DEFAULT_CITY) {
+  const code = cityCodeFor(city, 'yupaopin');
+  return `${SITE}/topic/${code}${CAT_ALL}/?keywords=${encodeURIComponent(keyword)}`;
 }
 
-export const homeUrl = `${SITE}/${CITY_CODE}/`;
+/** homeUrl 随城市切换（其他平台 homeUrl 是静态地址只有这个要变） */
+export function homeUrlOf(city = DEFAULT_CITY) {
+  return `${SITE}/${cityCodeFor(city, 'yupaopin')}/`;
+}
+
+/** 默认 homeUrl（苏州），保持旧代码兼容 */
+export const homeUrl = homeUrlOf();
 
 /** 登录入口页（APP / 微信扫码登录）。login 检测到未登录时会新开标签卡打开它。 */
 export const loginUrl = `${SITE}/web/login/`;
@@ -186,8 +192,8 @@ const SCAN_CARDS = `(function(){
 const COUNT = `document.querySelectorAll('a[href*="/qiye/"]').length`;
 
 /** 单轮：导航 → 滚动懒加载 → 扫卡片（鱼泡无翻页，池子靠滚动扩） */
-async function scanOnce(cdp, keyword, { rounds = 8, settle = 2600 } = {}) {
-  await navigate(cdp, searchUrl(keyword), { settle: 4500 });
+async function scanOnce(cdp, keyword, { rounds = 8, settle = 2600, city = DEFAULT_CITY } = {}) {
+  await navigate(cdp, searchUrl(keyword, city), { settle: 4500 });
   const g = await guard(cdp);
   if (!g || g.slider || g.waf || g.loginPage) return { items: [], stopped: g || { reason: 'probe_failed' } };
 
@@ -208,8 +214,8 @@ async function scanOnce(cdp, keyword, { rounds = 8, settle = 2600 } = {}) {
 }
 
 /** 单关键词采集：刷新 N 次合并去重（默认 1 = 关闭；href 里 token 每次刷新都变，只有数字段稳定） */
-export async function scanKeyword(cdp, keyword, { rounds = 8, settle = 2600, refresh = 1 } = {}) {
-  return multiScan((r) => scanOnce(cdp, keyword, { rounds, settle }), {
+export async function scanKeyword(cdp, keyword, { rounds = 8, settle = 2600, refresh = 1, city = DEFAULT_CITY } = {}) {
+  return multiScan((r) => scanOnce(cdp, keyword, { rounds, settle, city }), {
     refresh,
     keyOf: (j) => jobIdOf(j.href) || j.href || '',
     pauseMs: 3500,
@@ -259,11 +265,14 @@ export function resolveUrl(item) {
 }
 
 /** 搜索/热门职位页：用于按岗位 ID 反查最新 token（见 recoverUrl） */
-const LIST_URLS = [
-  `${SITE}/topic/${CITY_CODE}${CAT_ALL}/?keywords=C%23`,
-  `${SITE}/zhaogong/${CITY_CODE}_rmgz/`,
-  `${SITE}/${CITY_CODE}/`,
-];
+function listUrlsFor(city = DEFAULT_CITY) {
+  const code = cityCodeFor(city, 'yupaopin');
+  return [
+    `${SITE}/topic/${code}${CAT_ALL}/?keywords=C%23`,
+    `${SITE}/zhaogong/${code}_rmgz/`,
+    `${SITE}/${code}/`,
+  ];
+}
 
 /**
  * token 失效兜底：鱼泡详情页 URL 里的 token **有时效**（实测隔天再访同一条 url 会跳
@@ -274,9 +283,10 @@ const LIST_URLS = [
  *
  * @returns {Promise<string|null>} 新 URL；捞不到返回 null
  */
-export async function recoverUrl(cdp, item, { tries = 3 } = {}) {
+export async function recoverUrl(cdp, item, { tries = 3, city = DEFAULT_CITY } = {}) {
   const id = String(item.id || jobIdOf(item.url || item.href) || '');
   if (!id) return null;
+  const LIST_URLS = listUrlsFor(city);
   for (let k = 0; k < Math.min(tries, LIST_URLS.length); k++) {
     await navigate(cdp, LIST_URLS[k], { settle: 3500 });
     for (let s = 0; s < 3; s++) {   // 列表懒加载，滚一轮再找
@@ -302,12 +312,13 @@ export function jobIdOf(href) {
   return m ? m[1] : null;
 }
 
-export function normalize(items) {
+export function normalize(items, city = DEFAULT_CITY) {
+  const cityLabel = (resolveCity(city) || resolveCity(DEFAULT_CITY)).label;
   return items
     .filter((j) => j.title && jobIdOf(j.href))
     .map((j) => {
       const n = normSalary(j.salRaw || j.sal);
-      const loc = normalizeLoc(j.loc);
+      const loc = normalizeLoc(j.loc, city);
       return {
         ...j,
         id: jobIdOf(j.href),
@@ -315,7 +326,7 @@ export function normalize(items) {
         salRaw: j.salRaw || j.sal || '',
         capK: n.capK,
         loc,                                   // 供 targets/汇报展示
-        city: loc ? '苏州' : '',               // 供 cityOk() 判定（见函数注释）
+        city: loc ? cityLabel : '',             // 供 cityOk() 判定（见函数注释）
         url: resolveUrl(j),
       };
     });
@@ -324,22 +335,23 @@ export function normalize(items) {
 /**
  * 城市字段归一化。
  *
- * 搜索 URL 已锁定 `/topic/a221/`（a221 = 苏州），返回的每一条都是苏州的岗，
- * 无需再按地名过滤。但 `criteria.cityOk()` 默认只认字符串里的「苏州」二字，
- * 而鱼泡的 loc 有三种写法：`苏州·吴中区` / `苏州·昆山市` / 裸 `苏州` ——
- * 前两种含「苏州」没问题，**裸「苏州」以外的苏州下辖区**（`昆山市`/`常熟市`/`太仓市`）
- * 会被误判成「非苏州」而整批丢掉。
+ * 搜索 URL 已锁定城市站点编码（`/topic/a221c0/` 之类），返回的每一条都是目标城市的岗，
+ * 无需再按地名过滤。但 `criteria.cityOk()` 只认字符串里的城市名，而鱼泡的 loc
+ * 有三种写法：`苏州·吴中区` / `苏州·昆山市` / 裸 `昆山市` ——
+ * 前两种含城市名没问题，**裸下属市区**会被误判成「非目标城市」而整批丢掉。
  *
- * 因此这里把下辖市/区统一补出「苏州」前缀，让 cityOk() 判得对。
+ * 因此这里把城市下辖县级市/区统一补出城市前缀，让 cityOk() 判得对。
+ * 城市下辖列表从 city.mjs 的 `alias` 字段动态取，苏州/上海/北京各不同。
  */
-export function normalizeLoc(loc) {
+export function normalizeLoc(loc, city = DEFAULT_CITY) {
   const s = String(loc || '').trim();
   if (!s) return '';
-  if (s.indexOf('苏州') >= 0) return s;
-  // 苏州下辖县级市/区（实测列表会出现裸写法）
-  const SUB = /^(昆山市?|常熟市?|张家港市?|太仓市?|吴中区?|虎丘区?|相城区?|姑苏区?|吴江区?|平江区?|沧浪区?|金阊区?|高新区?|工业园区?|吴中区?)$/;
+  const c = resolveCity(city) || resolveCity(DEFAULT_CITY);
+  if (s.indexOf(c.label) >= 0) return s;
   const bare = s.split('·').pop().trim();
-  return SUB.test(bare) ? `苏州·${bare}` : s;
+  const aliases = [c.label, ...(c.alias || [])].map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const SUB = new RegExp(`^(${aliases.join('|')})市?$`);
+  return SUB.test(bare) ? `${c.label}·${bare}` : s;
 }
 
 // ---------------------------------------------------------------- JD

@@ -9,9 +9,10 @@ import { dataPath, writeJSONAtomic } from '../core/io.mjs';
 import { capK } from '../core/salary.mjs';
 import { jobIdOf } from '../core/dedupe.mjs';
 import { sleep } from '../core/cdp.mjs';
+import { DEFAULT_CITY } from '../core/city.mjs';
 
 export async function scan(opts = {}) {
-  const { platform: pid, keywords, out, capKMin = 25, log = console.log } = opts;
+  const { platform: pid, keywords, out, capKMin = 25, log = console.log, city = DEFAULT_CITY } = opts;
   // 平台内多刷新次数（如 BOSS 推荐视图靠反复刷新换结果去重；1 = 关闭）
   const refresh = opts.refresh ? Number(opts.refresh) : undefined;
   const { cdp, platform } = await session(pid, { tabId: opts.tabId });
@@ -24,13 +25,13 @@ export async function scan(opts = {}) {
   const seen = new Set();
   let stopped = null;
 
-  log(`\n=== ${platform.label} 采集 | 关键词 ${kws.length} 个${refresh ? ` | 每关键词刷新 ${refresh} 次` : ''} ===`);
+  log(`\n=== ${platform.label} 采集（${city}）| 关键词 ${kws.length} 个${refresh ? ` | 每关键词刷新 ${refresh} 次` : ''} ===`);
   for (const kw of kws) {
     if (stopped) break;
     log(`--- ${kw} ---`);
     let res;
     try {
-      res = await platform.scanKeyword(cdp, kw, refresh ? { refresh } : {});
+      res = await platform.scanKeyword(cdp, kw, refresh ? { refresh, city } : { city });
     } catch (e) {
       log(`  !! ${kw} 出错: ${e.message}（跳过该关键词）`);
       continue;
@@ -42,7 +43,7 @@ export async function scan(opts = {}) {
       log(`  !! 页面未发现职位卡片：${JSON.stringify(res.diagnostic)}`);
     }
 
-    let items = platform.normalize ? platform.normalize(res.items) : res.items;
+    let items = platform.normalize ? platform.normalize(res.items, city) : res.items;
     let added = 0;
     let dupInKeyword = 0;
     const kwSeen = new Set();

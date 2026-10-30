@@ -13,9 +13,10 @@ import { capK } from '../core/salary.mjs';
 import { blockedCompany, coarseScreen, requireScreen, cityOk, criteria } from '../core/criteria.mjs';
 import { loadHistory, historyIndex, isSeen } from '../core/dedupe.mjs';
 import { dedupeProfile } from '../platforms/index.mjs';
+import { DEFAULT_CITY } from '../core/city.mjs';
 
 export async function jd(opts = {}) {
-  const { platform: pid, capKMin = criteria().capKMin, dedupe = true, limit = 0, log = console.log } = opts;
+  const { platform: pid, capKMin = criteria().capKMin, dedupe = true, limit = 0, log = console.log, city = DEFAULT_CITY } = opts;
   const { cdp, platform } = await session(pid, { tabId: opts.tabId });
 
   const inFile = opts.in || latestDataFile('raw', `${pid}-scan`);
@@ -32,7 +33,7 @@ export async function jd(opts = {}) {
   for (const j of base) {
     const title = j.title || j.name || '';
     if (capK(j.sal || j.salary) < capKMin) { dropped.push({ ...j, why: `薪资上限<${capKMin}K` }); continue; }
-    if (!cityOk(j)) { dropped.push({ ...j, why: '非苏州' }); continue; }
+    if (!cityOk(j, city)) { dropped.push({ ...j, why: `非${city}` }); continue; }
     const blk = blockedCompany(j.company || j.txt || '');
     if (blk) { dropped.push({ ...j, why: `屏蔽:${blk}` }); continue; }
     const coarse = coarseScreen(title);

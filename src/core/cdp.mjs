@@ -3,6 +3,11 @@
  *
  * 反爬铁律：绝不调用 Runtime.enable / Page.enable / DOM.enable（平台检测到会秒关标签页）。
  */
+import { WebSocketImpl } from './ws.mjs';
+
+// Node 22 自带 WebSocket；Node 18/20 没有，回退到自带实现（否则 login/daily 直接报 WebSocket is not defined）
+const WebSocketCtor = globalThis.WebSocket || WebSocketImpl;
+
 export const PORT = Number(process.env.CDP_PORT || 9222);
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -79,7 +84,7 @@ export async function attach(tabId) {
   const pages = await listPages();
   const t = (tabId && pages.find((p) => p.id === tabId)) || pages.find((p) => !p.url.startsWith('chrome://')) || pages[0];
   if (!t) throw new Error('no page target（CDP 是否已启动？）');
-  const ws = new WebSocket(t.webSocketDebuggerUrl);
+  const ws = new WebSocketCtor(t.webSocketDebuggerUrl);
   await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new Error('ws error')); });
   return { cdp: new CDP(ws), target: t };
 }

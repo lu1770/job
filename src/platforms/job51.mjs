@@ -12,6 +12,7 @@
 import { evalJson, evalJs, sleep, clickAt, navigate, rand } from '../core/cdp.mjs';
 import { makeReadJd } from '../core/readjd.mjs';
 import { multiScan } from '../core/multiscan.mjs';
+import { cityCodeFor, DEFAULT_CITY } from '../core/city.mjs';
 
 /** 从详情 URL 提取岗位 id（scan / history 共用） */
 export const ID_RE = /51job\.com\/all\/(\d+)\.html/;
@@ -21,11 +22,13 @@ export const label = '前程无忧 51job';
 
 export const DEFAULT_KEYWORDS = ['.Net', 'C#', '上位机', 'WPF', 'MES'];
 
-export const JOB_AREA = '070300'; // 苏州
 export const VIEWPORT = 'wide';    // 必须 wide
 export const pace = { min: 25, max: 45 }; // 秒，必须慢
 
-export function searchUrl(keyword) { return `https://we.51job.com/pc/search?jobArea=${JOB_AREA}&keyword=${encodeURIComponent(keyword)}&searchType=2`; }
+export function searchUrl(keyword, city = DEFAULT_CITY) {
+  const jobArea = cityCodeFor(city, 'job51');
+  return `https://we.51job.com/pc/search?jobArea=${jobArea}&keyword=${encodeURIComponent(keyword)}&searchType=2`;
+}
 export function detailUrl(jobId) { return `https://jobs.51job.com/all/${jobId}.html`; }
 
 /** 登录入口页（扫码 / 微信登录）。login 检测到未登录时会新开标签卡打开它。 */
@@ -93,13 +96,13 @@ const SCAN_CARDS = `(function(){
 })()`;
 
 /** 单页扫描（薪资优先排序由调用方先点击） */
-export async function scanPage(cdp, keyword) {
-  await navigate(cdp, searchUrl(keyword), { settle: 3000 });
+export async function scanPage(cdp, keyword, { city = DEFAULT_CITY } = {}) {
+  await navigate(cdp, searchUrl(keyword, city), { settle: 3000 });
   const g = await guard(cdp);
   if (g && g.slider) {
     // 滑块：等 15 分钟刷新后重扫一次；仍被拦才报停止
-    if (!(await sliderRecover(cdp, searchUrl(keyword)))) return { items: [], stopped: g };
-    return scanPage(cdp, keyword);
+    if (!(await sliderRecover(cdp, searchUrl(keyword, city)))) return { items: [], stopped: g };
+    return scanPage(cdp, keyword, { city });
   }
   if (!g || g.loginWall) return { items: [], stopped: g };
   const items = (await evalJson(cdp, SCAN_CARDS, 20000)) || [];
@@ -107,16 +110,16 @@ export async function scanPage(cdp, keyword) {
 }
 
 /** 单轮：先点「薪资优先」再扫（原 scan.mjs scanWithSort 特例收编进适配器） */
-async function scanOnce(cdp, keyword) {
-  await scanPage(cdp, keyword);
+async function scanOnce(cdp, keyword, { city = DEFAULT_CITY } = {}) {
+  await scanPage(cdp, keyword, { city });
   await sortBySalary(cdp);
   await sleep(2600);
-  return scanPage(cdp, keyword);
+  return scanPage(cdp, keyword, { city });
 }
 
 /** 单关键词采集：刷新 N 次合并去重（默认 1 = 关闭） */
-export async function scanKeyword(cdp, keyword, { refresh = 1 } = {}) {
-  return multiScan(() => scanOnce(cdp, keyword), { refresh, keyOf: (j) => j.jobId, pauseMs: 3000 });
+export async function scanKeyword(cdp, keyword, { refresh = 1, city = DEFAULT_CITY } = {}) {
+  return multiScan(() => scanOnce(cdp, keyword, { city }), { refresh, keyOf: (j) => j.jobId, pauseMs: 3000 });
 }
 
 /** 点击「薪资优先」排序 */
@@ -135,8 +138,8 @@ export async function gotoPage(cdp, n) {
   })()`, 12000);
 }
 
-export function normalize(items) {
-  return items.map((j) => ({ ...j, url: detailUrl(j.jobId), id: j.jobId, loc: j.area }));
+export function normalize(items, city = DEFAULT_CITY) {
+  return items.map((j) => ({ ...j, url: detailUrl(j.jobId), id: j.jobId, loc: j.area, city: j.area }));
 }
 
 export const readJd = makeReadJd({ head: `document.querySelector('h1')||document.querySelector('.jobhead-title')` });

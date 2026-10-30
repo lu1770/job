@@ -13,6 +13,7 @@ import { evalJson, evalJs, sleep, clickAt, navigate } from '../core/cdp.mjs';
 import { makeReadJd } from '../core/readjd.mjs';
 import { multiScan } from '../core/multiscan.mjs';
 import { exprFindConv, exprScrollBottom } from '../core/pagejs.mjs';
+import { cityCodeFor, DEFAULT_CITY } from '../core/city.mjs';
 
 /** 从详情 URL 提取岗位 id（scan / history 共用） */
 export const ID_RE = /job_detail\/([^.]+)\.html/;
@@ -25,12 +26,12 @@ export const DEFAULT_KEYWORDS = [
   '运动控制', '工业软件', '自动化软件', '.NET开发', 'C#开发', '工控', '软件工程师',
 ];
 
-export const CITY = '101190400'; // 苏州
 export const ORIGIN = 'https://www.zhipin.com';
 export const CHAT_URL = 'https://www.zhipin.com/web/geek/chat';
 
-export function searchUrl(keyword) {
-  return `https://www.zhipin.com/web/geek/jobs?query=${encodeURIComponent(keyword)}&city=${CITY}`;
+export function searchUrl(keyword, city = DEFAULT_CITY) {
+  const cityCode = cityCodeFor(city, 'boss');
+  return `https://www.zhipin.com/web/geek/jobs?query=${encodeURIComponent(keyword)}&city=${cityCode}`;
 }
 
 export const homeUrl = 'https://www.zhipin.com/web/geek/chat';
@@ -95,8 +96,8 @@ function idOf(href) {
 }
 
 /** 单次加载：导航 → 滚动懒加载 → 扫卡片 */
-async function scanOnce(cdp, keyword, { rounds = 25, settle = 2600 } = {}) {
-  await navigate(cdp, searchUrl(keyword), { settle: 2200 });
+async function scanOnce(cdp, keyword, { rounds = 25, settle = 2600, city = DEFAULT_CITY } = {}) {
+  await navigate(cdp, searchUrl(keyword, city), { settle: 2200 });
   const g = await guard(cdp);
   if (!g || g.slider || g.loginWall) return { items: [], stopped: g || { reason: 'probe_failed' } };
 
@@ -127,8 +128,8 @@ async function scanOnce(cdp, keyword, { rounds = 25, settle = 2600 } = {}) {
  *
  * 若某次刷新后池子没增长（推荐流返回完全相同的内容），提前结束，不空耗时间。
  */
-export async function scanKeyword(cdp, keyword, { rounds = 25, settle = 2600, refresh = 3 } = {}) {
-  return multiScan((r) => scanOnce(cdp, keyword, { rounds, settle }), {
+export async function scanKeyword(cdp, keyword, { rounds = 25, settle = 2600, refresh = 3, city = DEFAULT_CITY } = {}) {
+  return multiScan((r) => scanOnce(cdp, keyword, { rounds, settle, city }), {
     refresh,
     keyOf: (j) => idOf(j.href),
     pauseMs: settle + 1500,   // 轮间真间隔，别把请求打成突发
@@ -141,7 +142,7 @@ export function resolveUrl(item) {
   return u.startsWith('/') ? ORIGIN + u : u;
 }
 
-export function normalize(items) {
+export function normalize(items, city = DEFAULT_CITY) {
   return items.map((j) => ({ ...j, url: resolveUrl(j) }));
 }
 

@@ -10,6 +10,7 @@ import { listPages, openTab, PORT } from '../core/cdp.mjs';
 import { session } from '../core/session.mjs';
 import { getPlatform, PRIORITY } from '../platforms/index.mjs';
 import { ensureDirs } from '../core/io.mjs';
+import { homeUrlFor } from '../core/city.mjs';
 
 export async function login(opts = {}) {
   const { log = console.log } = opts;
@@ -28,7 +29,7 @@ export async function login(opts = {}) {
   for (const pid of ids) {
     const p = getPlatform(pid);
     try {
-      const { cdp, target } = await session(pid, { tabId: opts.tabId, newTabUrl: opts.tabId ? undefined : p.homeUrl });
+      const { cdp, target } = await session(pid, { tabId: opts.tabId, newTabUrl: opts.tabId ? undefined : homeUrlFor(pid, opts.city) });
       await new Promise((r) => setTimeout(r, 3000));
       const probe = p.loginProbe ? await p.loginProbe(cdp) : {};
       cdp.close();

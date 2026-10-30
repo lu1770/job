@@ -91,10 +91,15 @@ export function requireScreen(title) {
   return criteria().require.some((re) => re.test(t));
 }
 
+import { cityRegex, DEFAULT_CITY, resolveCity } from './city.mjs';
+
 /** 城市口径（各平台字段名不同，统一在这里判） */
-export function cityOk(item, patterns = /苏州/) {
+export function cityOk(item, city = DEFAULT_CITY) {
   const s = String(item.loc || item.city || item.area || item.company || item.txt || '');
-  return patterns.test(s);
+  // 城市字段为空时：如果搜索 URL 是按目标城市锁死的（全部平台都是），
+  // 这条就是目标城市的岗，放它过去；只在 URL 城市参数被外部篡改时才会误漏。
+  if (!s) return true;
+  return cityRegex(city).test(s);
 }
 
 /**

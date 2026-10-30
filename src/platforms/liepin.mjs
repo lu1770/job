@@ -13,6 +13,7 @@ import { evalJson, evalJs, sleep, clickAt, navigate } from '../core/cdp.mjs';
 import { makeReadJd } from '../core/readjd.mjs';
 import { multiScan } from '../core/multiscan.mjs';
 import { exprFindConv } from '../core/pagejs.mjs';
+import { cityCodeFor, cityRegex, DEFAULT_CITY } from '../core/city.mjs';
 
 /** 从详情 URL 提取岗位 id（scan / history 共用） */
 export const ID_RE = /liepin\.com\/(?:a|job)\/(\d+)/;
@@ -24,10 +25,9 @@ export const DEFAULT_KEYWORDS = [
   '.NET', 'C#', '上位机', 'WPF', 'WinForm', 'MES', '运动控制', '工业软件', '自动化软件',
 ];
 
-export const DQ = '060080'; // 苏州
-
-export function searchUrl(keyword) {
-  return `https://www.liepin.com/zhaopin/?key=${encodeURIComponent(keyword)}&dq=${DQ}`;
+export function searchUrl(keyword, city = DEFAULT_CITY) {
+  const dq = cityCodeFor(city, 'liepin');
+  return `https://www.liepin.com/zhaopin/?key=${encodeURIComponent(keyword)}&dq=${dq}`;
 }
 
 export const homeUrl = 'https://www.liepin.com/zhaopin/';
@@ -84,8 +84,8 @@ const SCAN_CARDS = `(function(){
 })()`;
 
 /** 单轮：导航 → 滚动懒加载 → 扫卡片 */
-async function scanOnce(cdp, keyword, { rounds = 15, settle = 2400 } = {}) {
-  await navigate(cdp, searchUrl(keyword), { settle: 3000 });
+async function scanOnce(cdp, keyword, { rounds = 15, settle = 2400, city = DEFAULT_CITY } = {}) {
+  await navigate(cdp, searchUrl(keyword, city), { settle: 3000 });
   const g = await guard(cdp);
   if (!g || g.slider || g.risk || g.loginWall) return { items: [], stopped: g || { reason: 'probe_failed' } };
 
@@ -102,8 +102,8 @@ async function scanOnce(cdp, keyword, { rounds = 15, settle = 2400 } = {}) {
 }
 
 /** 单关键词采集：刷新 N 次合并去重（默认 1 = 关闭，搜索结果集较稳定） */
-export async function scanKeyword(cdp, keyword, { rounds = 15, settle = 2400, refresh = 1 } = {}) {
-  return multiScan((r) => scanOnce(cdp, keyword, { rounds, settle }), {
+export async function scanKeyword(cdp, keyword, { rounds = 15, settle = 2400, refresh = 1, city = DEFAULT_CITY } = {}) {
+  return multiScan((r) => scanOnce(cdp, keyword, { rounds, settle, city }), {
     refresh,
     keyOf: (j) => {
       const m = String(j.href || '').match(ID_RE);
@@ -112,9 +112,10 @@ export async function scanKeyword(cdp, keyword, { rounds = 15, settle = 2400, re
   });
 }
 
-/** 只保留苏州（或城市字段为空但整体文本含苏州） */
-export function normalize(items) {
-  return items.filter((j) => !j.city || /苏州/.test(j.city) || /苏州/.test(j.txt || ''));
+/** 只保留目标城市（或城市字段为空但整体文本含目标城市） */
+export function normalize(items, city = DEFAULT_CITY) {
+  const re = cityRegex(city);
+  return items.filter((j) => !j.city || re.test(j.city) || re.test(j.txt || ''));
 }
 
 // ---------------------------------------------------------------- JD

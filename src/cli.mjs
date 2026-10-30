@@ -25,6 +25,7 @@ import { daily } from './commands/daily.mjs';
 import { keywords } from './commands/keywords.mjs';
 import { rebuildHistory } from './commands/history.mjs';
 import { PLATFORMS, PRIORITY } from './platforms/index.mjs';
+import { DEFAULT_CITY, listCities } from './core/city.mjs';
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -63,6 +64,7 @@ const HELP = `
 
 通用选项
   --platform <id>       ${Object.keys(PLATFORMS).join(' | ')}（可逗号分隔）
+  --city <name>         目标城市（默认「${DEFAULT_CITY}」；已支持：${listCities().join('、')}）
   --tab <id>            显式指定标签页（并行时必须）
   --keywords "a,b,c"    覆盖默认关键词
   --cap <K>             薪资上限阈值，默认 25
@@ -87,6 +89,7 @@ async function main() {
 
   const base = {
     platform: a.platform,
+    city: a.city ?? DEFAULT_CITY,
     tabId: a.tab,
     keywords: a.keywords,
     capKMin: a.cap ? Number(a.cap) : undefined,
