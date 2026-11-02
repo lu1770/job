@@ -23,6 +23,10 @@ export const label = '前程无忧 51job';
 export const DEFAULT_KEYWORDS = ['.Net', 'C#', '上位机', 'WPF', 'MES'];
 
 export const VIEWPORT = 'wide';    // 必须 wide
+
+/** 每日投递数量上限 */
+export const DAILY_LIMIT = 200;
+
 export const pace = { min: 25, max: 45 }; // 秒，必须慢
 
 export function searchUrl(keyword, city = DEFAULT_CITY) {

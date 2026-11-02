@@ -282,5 +282,8 @@ export async function sendMessage(cdp, { key, text, retries = 3 }) {
   return { result: Number(left) === 0 ? 'sent' : 'uncertain', inputLeft: left };
 }
 
+/** 每日投递数量上限 */
+export const DAILY_LIMIT = 200;
+
 /** 平台级节奏建议（秒） */
 export const pace = { min: 6, max: 12 };

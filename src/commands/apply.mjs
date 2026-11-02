@@ -54,6 +54,9 @@ export async function apply(opts = {}) {
   let stopped = null;
   let quota = null;
 
+  // 每日投递数量上限（平台可选声明，未声明则不截断）
+  const dailyLimit = platform.DAILY_LIMIT || 0;
+
   // 业务性终态：不是「投递失败」，是「这条不需要投」。单独计数，别混进 fail 拉低成功率。
   const SKIP_RESULTS = new Set([
     'closed',       // 已招满 / 下架
@@ -61,7 +64,7 @@ export async function apply(opts = {}) {
     'not_found',    // 岗位已删除，恢复 token 也找不到
   ]);
 
-  log(`\n=== ${platform.label} 投递（${mode}）${items.length} 条｜节奏 ${pace.min / 1000}-${pace.max / 1000}s ===`);
+  log(`\n=== ${platform.label} 投递（${mode}）${items.length} 条｜节奏 ${pace.min / 1000}-${pace.max / 1000}s${dailyLimit ? `｜每日上限 ${dailyLimit}` : ''} ===`);
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     const rec = { ...item };
@@ -93,8 +96,19 @@ export async function apply(opts = {}) {
         sink.push(rec);
         break;
       }
+
+      // 每日上限熔断：成功投递数（ok + already）达到平台声明上限时停止
+      const totalApplied = ok + already;
+      if (dailyLimit && totalApplied >= dailyLimit) {
+        stopped = 'daily_limit';
+        quota = { used: totalApplied, left: 0, limit: dailyLimit };
+        log(`${tag} -> 🛑 每日投递上限 ${dailyLimit} 已达（${totalApplied}） —— 停止本平台`);
+        sink.push(rec);
+        break;
+      }
+
       const mark = { ok: '✅', already: '⏭', unknown: '⚠️', closed: '🚫', chat_only: '💬', not_found: '🚫' }[r.result] || '❌';
-      log(`${tag} -> ${mark} ${r.result}`);
+      log(`${tag} -> ${mark} ${r.result}${dailyLimit ? `（${totalApplied}/${dailyLimit}）` : ''}`);
     } catch (e) {
       rec.result = 'error';
       rec.err = e.message;

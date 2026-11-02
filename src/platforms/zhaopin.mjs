@@ -28,6 +28,10 @@ export const label = '智联招聘';
 export const DEFAULT_KEYWORDS = ['.NET', 'C#', '上位机', 'WPF', 'MES'];
 
 export const SITE = 'https://www.zhaopin.com';
+
+/** 每日投递数量上限 */
+export const DAILY_LIMIT = 200;
+
 export const pace = { min: 6, max: 12 };
 
 /** 本平台不通过 URL 定位岗位 */

@@ -46,6 +46,10 @@ export const CAT_ALL = 'c0';
 export const SITE = 'https://www.yupao.com';
 
 export const VIEWPORT = 'wide';           // 布局宽，且投递要真实鼠标兜底 → 必须 wide
+
+/** 每日投递数量上限 */
+export const DAILY_LIMIT = 200;
+
 export const pace = { min: 15, max: 30 }; // 有 WAF + 访问量未知，宁慢勿快
 
 /**

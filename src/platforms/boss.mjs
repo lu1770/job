@@ -314,5 +314,8 @@ export async function sendMessage(cdp, { key, verify, text, retries = 3 }) {
   return { result: ok ? 'sent' : 'uncertain', head, found, before, after, inputLeft: left };
 }
 
+/** 每日投递数量上限（平台侧硬限制 150，保守取 75 提前熔断） */
+export const DAILY_LIMIT = 75;
+
 /** 平台级节奏建议（秒） */
 export const pace = { min: 6, max: 12 };
