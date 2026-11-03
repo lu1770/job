@@ -343,6 +343,44 @@ function searchForm(k) {
 }
 
 /**
+ * JD 关键词类别白名单——daily 默认关键字只取技术栈相关类别，
+ * 排除行业（半导体/汽车）、工程能力（测试/调试/文档/版本管理）、软技能（沟通/客户）等泛词。
+ */
+const TECH_CATS = new Set([
+  '语言/框架', '工控/设备', '通信/协议', '业务系统',
+  '算法/检测', '底层/硬件', '数据/中间件',
+]);
+
+/**
+ * 取 beforeDate 之前最近一次 JD 关键词排行中的「技术栈相关」前 n 个（daily 未传 --keywords 时首选）。
+ * 只保留语言/框架、工控/设备、通信/协议、业务系统、算法/检测、底层/硬件、数据/中间件七类，
+ * 排除行业/工程能力/软技能等泛词（如「测试/沟通/系统设计/半导体」等会被过滤）。
+ * 若无可用的历史排行或过滤后为空，返回 null。
+ */
+export function techKeywordsFrom(beforeDate, n = 10) {
+  if (!fs.existsSync(DATA.work)) return null;
+  const file = fs.readdirSync(DATA.work)
+    .map((f) => { const m = f.match(/^jd-keywords-(\d{8})\.json$/); return m && m[1] < String(beforeDate) ? { f, d: m[1] } : null; })
+    .filter(Boolean)
+    .sort((a, b) => (a.d < b.d ? -1 : 1))
+    .pop();
+  if (!file) return null;
+  let payload;
+  try { payload = JSON.parse(fs.readFileSync(path.join(DATA.work, file.f), 'utf8')); } catch { return null; }
+  const seen = new Set();
+  const out = [];
+  for (const k of payload.keywords || []) {
+    if (!TECH_CATS.has(k.cat)) continue;
+    const q = searchForm(k.keyword);
+    if (!q || seen.has(q)) continue;
+    seen.add(q);
+    out.push(q);
+    if (out.length >= n) break;
+  }
+  return out.length ? { date: file.d, keywords: out } : null;
+}
+
+/**
  * 取 beforeDate 之前最近一天的 JD 关键词排行前 n 个（daily 未传 --keywords 时兜底）。
  * 返回 null 表示没有可用的历史排行。
  */
