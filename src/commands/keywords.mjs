@@ -368,6 +368,37 @@ export function topKeywordsFrom(beforeDate, n = 10) {
   return out.length ? { date: file.d, keywords: out } : null;
 }
 
+/**
+ * 取 beforeDate 之前最近一次「猎聘采集关键字」统计的前 n 个（daily 未传 --keywords 时的首选）。
+ * 从最新往旧找第一份含猎聘条目的 jd-keywords 文件，按当轮新增岗位数倒排。
+ * 返回 null 表示暂无猎聘采集记录。
+ */
+export function liepinKeywordsFrom(beforeDate, n = 10) {
+  if (!fs.existsSync(DATA.work)) return null;
+  const files = fs.readdirSync(DATA.work)
+    .map((f) => { const m = f.match(/^jd-keywords-(\d{8})\.json$/); return m && m[1] < String(beforeDate) ? { f, d: m[1] } : null; })
+    .filter(Boolean)
+    .sort((a, b) => (a.d < b.d ? 1 : -1)); // 新 -> 旧
+  for (const file of files) {
+    let payload;
+    try { payload = JSON.parse(fs.readFileSync(path.join(DATA.work, file.f), 'utf8')); } catch { continue; }
+    const rows = (payload.scanKeywords || []).filter((k) => k.platform === 'liepin' && k.keyword);
+    if (!rows.length) continue;
+    rows.sort((a, b) => b.added - a.added);
+    const seen = new Set();
+    const out = [];
+    for (const k of rows) {
+      const q = searchForm(k.keyword);
+      if (!q || seen.has(q)) continue;
+      seen.add(q);
+      out.push(q);
+      if (out.length >= n) break;
+    }
+    if (out.length) return { date: file.d, keywords: out };
+  }
+  return null;
+}
+
 export async function keywords(opts = {}) {
   const { log = console.log, top = 30, summary = null } = opts;
   const DATE = String(opts.date || ymd());

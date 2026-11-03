@@ -5,7 +5,8 @@
  * 任一平台触发风控/额度限制即跳过该平台，继续其他平台（用户口径）。
  *
  * 用法：node src/cli.mjs daily --platform liepin,boss [--keywords ".NET,C#"]
- * 不传 --keywords 时，自动用上一日 JD 关键词排行 Top10 采集。
+ * 不传 --keywords 时，优先用猎聘上轮采集关键字（按新增岗位数倒排），
+ * 暂无猎聘记录时退回上一日 JD 关键词排行 Top10。
  */
 import { login } from './login.mjs';
 import { scan } from './scan.mjs';
@@ -13,7 +14,7 @@ import { jd } from './jd.mjs';
 import { targets } from './targets.mjs';
 import { apply, verify } from './apply.mjs';
 import { chatRead } from './chat.mjs';
-import { keywords, topKeywordsFrom } from './keywords.mjs';
+import { keywords, topKeywordsFrom, liepinKeywordsFrom } from './keywords.mjs';
 import { rebuildHistory } from './history.mjs';
 import { PRIORITY, parseList } from '../platforms/index.mjs';
 import { openTab, sleep } from '../core/cdp.mjs';
@@ -31,16 +32,22 @@ export async function daily(opts = {}) {
     return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
   })();
 
-  // 未显式给 --keywords 时，沿用上一日 JD 关键词排行前十（自适应当天最热技术词）。
-  // 没有历史排行则交给各平台 DEFAULT_KEYWORDS 兜底。
+  // 未显式给 --keywords 时：首选猎聘上轮采集关键字（按当轮新增岗位数倒排，实测边际产出最好的词）；
+  // 暂无猎聘采集记录时退回全平台 JD 关键词排行 Top10；再没有才交给各平台 DEFAULT_KEYWORDS 兜底。
   let scanKeywords = parseList(opts.keywords);
   if (!scanKeywords.length) {
-    const prev = topKeywordsFrom(runDay, 10);
-    if (prev) {
-      scanKeywords = prev.keywords;
-      log(`未指定 --keywords，沿用 ${prev.date} 关键词 Top${prev.keywords.length}：${prev.keywords.join(', ')}`);
+    const lp = liepinKeywordsFrom(runDay, 10);
+    if (lp) {
+      scanKeywords = lp.keywords;
+      log(`未指定 --keywords，沿用 ${lp.date} 猎聘采集关键字 Top${lp.keywords.length}：${lp.keywords.join(', ')}`);
     } else {
-      log('未指定 --keywords，也没有历史关键词排行，使用各平台默认关键词');
+      const prev = topKeywordsFrom(runDay, 10);
+      if (prev) {
+        scanKeywords = prev.keywords;
+        log(`未指定 --keywords，暂无猎聘采集记录，沿用 ${prev.date} JD 关键词排行 Top${prev.keywords.length}：${prev.keywords.join(', ')}`);
+      } else {
+        log('未指定 --keywords，也没有历史关键词排行，使用各平台默认关键词');
+      }
     }
   }
 
