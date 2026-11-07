@@ -128,7 +128,7 @@ async function scanOnce(cdp, keyword, { rounds = 25, settle = 2600, city = DEFAU
  *
  * 若某次刷新后池子没增长（推荐流返回完全相同的内容），提前结束，不空耗时间。
  */
-export async function scanKeyword(cdp, keyword, { rounds = 25, settle = 2600, refresh = 3, city = DEFAULT_CITY } = {}) {
+export async function scanKeyword(cdp, keyword, { rounds = 25, settle = 2600, refresh = 1, city = DEFAULT_CITY } = {}) {
   return multiScan((r) => scanOnce(cdp, keyword, { rounds, settle, city }), {
     refresh,
     keyOf: (j) => idOf(j.href),
